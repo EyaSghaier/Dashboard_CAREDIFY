@@ -1,5 +1,4 @@
-
-  # CAREDIFY Dashboard
+# CAREDIFY Dashboard
 
   This is a code bundle for CAREDIFY Dashboard. The original project is available at https://www.figma.com/design/ZwDJQxGh5B2Cpk3VJS2YeW/CAREDIFY-Dashboard.
 
@@ -8,4 +7,3 @@
   Run `npm i` to install the dependencies.
 
   Run `npm run dev` to start the development server.
-  
