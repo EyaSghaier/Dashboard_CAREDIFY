@@ -118,7 +118,7 @@ export const LoginPage: React.FC = () => {
   const accent     = isDark ? DARK_MAIN : LIGHT_BLUE;
 
   // ✅ Appel direct Supabase + setLoading(false) dans tous les cas
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
@@ -150,12 +150,12 @@ export const LoginPage: React.FC = () => {
         throw new Error('Aucune session créée (session non disponible).');
       }
 
-      console.log('✅ [LOGIN] Authentication successful, navigating to dashboard');
+      console.log(' [LOGIN] Authentication successful, navigating to dashboard');
       setLoading(false); // ✅ reset avant navigate
       navigate('/dashboard', { replace: true });
 
     } catch (err: any) {
-      console.error('❌ [LOGIN] Authentication error:', err);
+      console.error('[LOGIN] Authentication error:', err);
       const errorMsg = err.message || t.error;
       setError(errorMsg);
       setLoading(false); // ✅ toujours reset
@@ -296,7 +296,7 @@ export const LoginPage: React.FC = () => {
 
               <button type="submit" disabled={loading}
                 className="w-full py-3 rounded-xl text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-2 disabled:opacity-70"
-                style={{ background: loading ? (isDark ? '#0369a1' : '#0D47A1') : btnBg, boxShadow: loading ? 'none' : btnShadow }}
+                style={{ background: loading ? (isDark ? '#0EA5E9' : '#1565C0') : btnBg, boxShadow: loading ? 'none' : btnShadow }}
                 onMouseEnter={(e) => { if (!loading) e.currentTarget.style.background = btnHover; }}
                 onMouseLeave={(e) => { if (!loading) e.currentTarget.style.background = btnBg; }}>
                 {loading ? <><Loader2 className="w-4 h-4 animate-spin" />{t.connecting}</> : t.submit}

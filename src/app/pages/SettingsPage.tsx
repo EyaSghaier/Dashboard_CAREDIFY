@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import {
   Bell, User, Shield, Sliders, Save, RefreshCw,
-  Mail, Phone, Monitor, Activity, CheckCircle,
+  Mail, Phone, Monitor, Activity, CheckCircle, MapPin, Navigation, NavigationOff,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
+import { useLocation } from '../context/LocationContext';
 import { useLang } from '../context/LanguageContext';
 import { supabase } from '../../lib/supabase';
 
@@ -35,6 +36,16 @@ const t = {
     zoneNormal: 'Normal', zoneRisk: 'Risque', zoneCrit: 'Crit.',
     statusCritique: 'CRITIQUE', statusAvert: 'AVERT.',
     loading: 'Chargement...', noProfile: 'Profil introuvable',
+    // Localisation
+    locTitle: 'Localisation', locSub: 'Partager votre position sur la carte de surveillance',
+    locToggleLabel: 'Activer la géolocalisation',
+    locToggleDesc: 'Autoriser le site à accéder à votre position GPS en temps réel',
+    locGranted: 'Position active', locDenied: 'Accès refusé',
+    locPending: 'En attente de permission…',
+    locCoords: (lat: number, lng: number) => `${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E`,
+    locError: 'Erreur de localisation',
+    locRevoke: 'Révoquer l\'accès',
+    locNote: 'Votre position sera visible sur la carte par vous uniquement.',
   },
   EN: {
     title: 'Settings', subtitle: 'System configuration and preferences',
@@ -63,6 +74,16 @@ const t = {
     zoneNormal: 'Normal', zoneRisk: 'Risk', zoneCrit: 'Crit.',
     statusCritique: 'CRITICAL', statusAvert: 'WARN.',
     loading: 'Loading...', noProfile: 'Profile not found',
+    // Location
+    locTitle: 'Location', locSub: 'Share your position on the surveillance map',
+    locToggleLabel: 'Enable geolocation',
+    locToggleDesc: 'Allow the site to access your real-time GPS position',
+    locGranted: 'Position active', locDenied: 'Access denied',
+    locPending: 'Waiting for permission…',
+    locCoords: (lat: number, lng: number) => `${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E`,
+    locError: 'Location error',
+    locRevoke: 'Revoke access',
+    locNote: 'Your position will only be visible to you on the map.',
   },
 };
 
@@ -96,6 +117,7 @@ export const SettingsPage: React.FC = () => {
   const { user, profile, refreshProfile } = useAuth();
   const { lang } = useLang();
   const tr = t[lang];
+  const loc = useLocation();
 
   const [threshold, setThreshold]           = useState(75);
   const [warningThreshold, setWarningThreshold] = useState(50);
@@ -410,6 +432,63 @@ export const SettingsPage: React.FC = () => {
               <button className="px-3 py-1.5 bg-[#EF4444]/10 border border-[#EF4444]/25 text-[#EF4444] rounded-lg text-xs hover:bg-[#EF4444]/20 transition-all">
                 {tr.exportData}
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Localisation */}
+        <div className="rounded-xl p-5 col-span-1 lg:col-span-2" style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
+          <SectionTitle icon={<MapPin className="w-4 h-4" />} title={tr.locTitle} subtitle={tr.locSub} />
+
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            {/* Toggle */}
+            <div className="flex-1">
+              <div className="flex items-center justify-between py-2">
+                <div>
+                  <p className="text-sm font-medium" style={{ color: 'var(--cd-t1)' }}>{tr.locToggleLabel}</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--cd-t4)' }}>{tr.locToggleDesc}</p>
+                </div>
+                <button
+                  onClick={loc.granted ? loc.revokePermission : loc.requestPermission}
+                  className="relative w-11 h-6 rounded-full transition-all duration-300 ml-4 flex-shrink-0"
+                  style={{ backgroundColor: loc.granted ? '#0EA5E9' : 'var(--cd-hv2)' }}
+                >
+                  <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-md transition-all duration-300 ${loc.granted ? 'left-6' : 'left-1'}`} />
+                </button>
+              </div>
+              {loc.error && (
+                <p className="text-xs mt-1 text-[#EF4444]">⚠ {tr.locError} : {loc.error}</p>
+              )}
+              <p className="text-[10px] mt-2" style={{ color: 'var(--cd-t5)' }}>{tr.locNote}</p>
+            </div>
+
+            {/* Status card */}
+            <div
+              className="flex items-center gap-3 px-4 py-3 rounded-xl flex-shrink-0"
+              style={{
+                background: loc.granted ? 'rgba(14,165,233,0.08)' : 'var(--cd-bg1)',
+                border: `1px solid ${loc.granted ? 'rgba(14,165,233,0.3)' : 'var(--cd-bd)'}`,
+                minWidth: '220px',
+              }}
+            >
+              {loc.granted ? (
+                <Navigation className="w-5 h-5 text-[#0EA5E9] animate-pulse flex-shrink-0" />
+              ) : (
+                <NavigationOff className="w-5 h-5 flex-shrink-0" style={{ color: 'var(--cd-t4)' }} />
+              )}
+              <div>
+                <p className="text-xs font-semibold" style={{ color: loc.granted ? '#0EA5E9' : 'var(--cd-t3)' }}>
+                  {loc.granted ? tr.locGranted : tr.locDenied}
+                </p>
+                <p className="text-[10px] mt-0.5" style={{ color: 'var(--cd-t4)' }}>
+                  {loc.position
+                    ? tr.locCoords(loc.position[0], loc.position[1])
+                    : loc.granted ? tr.locPending : '—'}
+                </p>
+              </div>
+              {loc.granted && loc.position && (
+                <span className="w-2 h-2 rounded-full bg-[#0EA5E9] animate-pulse ml-auto" />
+              )}
             </div>
           </div>
         </div>

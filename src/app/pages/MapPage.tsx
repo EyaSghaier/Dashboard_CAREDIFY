@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router';
-import { MapPin, Activity, Loader2, RefreshCw } from 'lucide-react';
-import { hospitalLocations, aedLocations } from '../data/mockData';
+import { MapPin, Activity, Loader2, RefreshCw, Navigation } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useLang } from '../context/LanguageContext';
 import { useTheme } from '../context/ThemeContext';
+import { useLocation } from '../context/LocationContext';
 
 declare global {
   interface Window {
@@ -58,14 +58,22 @@ export const MapPage: React.FC = () => {
   const mapInstanceRef = useRef<any>(null);
   const tileLayerRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+  const doctorMarkerRef = useRef<any>(null);
   const navigate = useNavigate();
   const { lang } = useLang();
   const { theme } = useTheme();
+  const loc = useLocation();
 
   const [mapReady, setMapReady] = useState(false);
   const [patients, setPatients] = useState<MapPatient[]>([]);
   const [loading, setLoading] = useState(true);
   const leafletLoadedRef = useRef(false);
+
+  // POI (hospitals + AEDs) loaded from Overpass or fallback mock
+  interface POI { id: string; name: string; location: [number, number]; type: 'hospital' | 'aed' }
+  const [pois, setPois] = useState<POI[]>([]);
+  const poisMarkersRef = useRef<any[]>([]);
+  const overpassFetchedRef = useRef<string | null>(null); // tracks last fetched coord key
 
   // ── Fetch real data ──────────────────────────────────────────────
   const fetchPatients = useCallback(async () => {
@@ -135,15 +143,70 @@ export const MapPage: React.FC = () => {
     document.head.appendChild(script);
   }, []);
 
+  // ── Fetch nearby hospitals & AEDs via Overpass API ───────────────
+  const fetchNearbyPOI = useCallback(async (lat: number, lng: number) => {
+    const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+    if (overpassFetchedRef.current === key) return; // already fetched for this location
+    overpassFetchedRef.current = key;
+
+    console.log('[MapPage] Fetching POI from Overpass for', lat, lng);
+
+    const radius = 5000; // 5 km
+    const query = `[out:json][timeout:25];(node["amenity"="hospital"](around:${radius},${lat},${lng});way["amenity"="hospital"](around:${radius},${lat},${lng});relation["amenity"="hospital"](around:${radius},${lat},${lng});node["amenity"="clinic"](around:${radius},${lat},${lng});way["amenity"="clinic"](around:${radius},${lat},${lng});node["emergency"="defibrillator"](around:${radius},${lat},${lng}););out center body 100;`;
+
+    try {
+      const res = await fetch(
+        'https://overpass-api.de/api/interpreter',
+        { method: 'POST', body: 'data=' + encodeURIComponent(query) }
+      );
+      if (!res.ok) throw new Error(`Overpass HTTP ${res.status}`);
+      const json = await res.json();
+      console.log('[MapPage] Overpass returned', json.elements?.length ?? 0, 'elements');
+
+      const results: POI[] = (json.elements ?? []).map((el: any) => {
+        const elLat = el.lat ?? el.center?.lat;
+        const elLng = el.lon ?? el.center?.lon;
+        if (!elLat || !elLng) return null;
+        const isAED = el.tags?.emergency === 'defibrillator';
+        const name = el.tags?.name ||
+          (isAED ? 'Défibrillateur' : el.tags?.amenity === 'clinic' ? 'Clinique' : 'Hôpital');
+        return {
+          id: String(el.id),
+          name,
+          location: [elLat, elLng] as [number, number],
+          type: isAED ? 'aed' : 'hospital',
+        } satisfies POI;
+      }).filter(Boolean) as POI[];
+
+      console.log('[MapPage] Parsed POIs:', results.length);
+      setPois(results);
+    } catch (err) {
+      console.error('[MapPage] Overpass fetch failed:', err);
+      // No fallback to mock data — just show nothing
+      setPois([]);
+    }
+  }, []);
+
+  // Trigger POI fetch when cardiologist position becomes available
+  useEffect(() => {
+    if (loc.position) {
+      fetchNearbyPOI(loc.position[0], loc.position[1]);
+    }
+    // No GPS → no POIs (no mock fallback)
+  }, [loc.position, fetchNearbyPOI]);
+
   // ── Init map ─────────────────────────────────────────────────────
   useEffect(() => {
     if (!mapReady || !mapRef.current || mapInstanceRef.current) return;
 
     const L = window.L;
 
+    // Center on doctor's real position if available, else Paris
+    const center: [number, number] = loc.position ?? parisBase;
+
     const map = L.map(mapRef.current, {
-      center: parisBase,
-      zoom: 12,
+      center,
+      zoom: loc.position ? 14 : 12,
       zoomControl: false,
     });
 
@@ -160,37 +223,8 @@ export const MapPage: React.FC = () => {
     L.control.zoom({ position: 'bottomright' }).addTo(map);
     mapInstanceRef.current = map;
 
-    // ── Static markers: hospitals ──────────────────────────────────
-    hospitalLocations.forEach((h) => {
-      const icon = L.divIcon({
-        html: `<div style="width:30px;height:30px;background:#3B82F6;border-radius:8px;border:2px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(59,130,246,0.5);font-size:14px;">🏥</div>`,
-        className: '',
-        iconSize: [30, 30],
-        iconAnchor: [15, 15],
-      });
-      L.marker(h.location, { icon }).addTo(map).bindPopup(`
-        <div style="background:#111827;color:white;border-radius:8px;padding:10px;border:1px solid #1F2937;font-family:system-ui">
-          <strong style="font-size:12px">${h.name}</strong><br>
-          <span style="color:#3B82F6;font-size:11px">${lang === 'EN' ? 'Hospital' : 'Établissement hospitalier'}</span>
-        </div>
-      `);
-    });
-
-    // ── Static markers: AEDs ───────────────────────────────────────
-    aedLocations.forEach((a) => {
-      const icon = L.divIcon({
-        html: `<div style="width:26px;height:26px;background:#F59E0B;border-radius:6px;border:2px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 8px rgba(245,158,11,0.5);font-size:12px;">⚡</div>`,
-        className: '',
-        iconSize: [26, 26],
-        iconAnchor: [13, 13],
-      });
-      L.marker(a.location, { icon }).addTo(map).bindPopup(`
-        <div style="background:#111827;color:white;border-radius:8px;padding:10px;border:1px solid #1F2937;font-family:system-ui">
-          <strong style="font-size:12px">${a.name}</strong><br>
-          <span style="color:#F59E0B;font-size:11px">${lang === 'EN' ? 'Automated defibrillator' : 'Défibrillateur automatique'}</span>
-        </div>
-      `);
-    });
+    // ── Static markers: hospitals & AEDs (replaced by dynamic POI layer) ──
+    // Markers are now rendered reactively in the pois useEffect below.
 
     // Pulse animation
     const style = document.createElement('style');
@@ -217,6 +251,125 @@ export const MapPage: React.FC = () => {
       }
     };
   }, [mapReady]);
+
+  // ── Handle popup button clicks via event delegation ──────────────
+  useEffect(() => {
+    const container = mapRef.current;
+    if (!container) return;
+
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest('[data-patient-id]') as HTMLElement | null;
+      if (btn) {
+        const id = btn.getAttribute('data-patient-id');
+        if (id) navigate(`/patients/${id}`);
+      }
+    };
+
+    container.addEventListener('click', handleClick);
+    return () => container.removeEventListener('click', handleClick);
+  }, [navigate]);
+
+  // ── Render POI markers (hospitals + AEDs) ────────────────────────
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.L) return;
+    const L = window.L;
+    const map = mapInstanceRef.current;
+
+    // Clear old POI markers
+    poisMarkersRef.current.forEach(m => map.removeLayer(m));
+    poisMarkersRef.current = [];
+
+    if (pois.length === 0) return;
+
+    console.log('[MapPage] Rendering', pois.length, 'POI markers on map');
+
+    pois.forEach((poi) => {
+      const isHospital = poi.type === 'hospital';
+      const bg = isHospital ? '#3B82F6' : '#F59E0B';
+      const glow = isHospital ? 'rgba(59,130,246,0.5)' : 'rgba(245,158,11,0.5)';
+      const emoji = isHospital ? '🏥' : '⚡';
+      const size = isHospital ? 30 : 26;
+      const radius = isHospital ? '8px' : '6px';
+
+      const icon = L.divIcon({
+        html: `<div style="width:${size}px;height:${size}px;background:${bg};border-radius:${radius};border:2px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px ${glow};font-size:${isHospital ? 14 : 12}px;">${emoji}</div>`,
+        className: '',
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
+      });
+
+      const typeLabel = isHospital
+        ? (lang === 'EN' ? 'Hospital' : 'Établissement hospitalier')
+        : (lang === 'EN' ? 'Automated defibrillator' : 'Défibrillateur automatique');
+
+      const marker = L.marker(poi.location, { icon }).addTo(map).bindPopup(`
+        <div style="background:#111827;color:white;border-radius:8px;padding:10px;border:1px solid #1F2937;font-family:system-ui">
+          <strong style="font-size:12px">${poi.name}</strong><br>
+          <span style="color:${bg};font-size:11px">${typeLabel}</span>
+        </div>
+      `);
+      poisMarkersRef.current.push(marker);
+    });
+  }, [pois, lang, mapReady]);
+
+  // ── Doctor's real-time position marker ───────────────────────────
+  useEffect(() => {
+    if (!mapInstanceRef.current || !window.L) return;
+    const L = window.L;
+    const map = mapInstanceRef.current;
+
+    // Remove previous doctor marker
+    if (doctorMarkerRef.current) {
+      map.removeLayer(doctorMarkerRef.current);
+      doctorMarkerRef.current = null;
+    }
+
+    if (!loc.granted || !loc.position) return;
+
+    const [lat, lng] = loc.position;
+
+    const iconHtml = `
+      <div style="position:relative;width:42px;height:42px">
+        <div style="position:absolute;inset:-8px;background:rgba(14,165,233,0.15);border-radius:50%;animation:pulse 1.5s infinite;"></div>
+        <div style="position:absolute;inset:-3px;background:rgba(14,165,233,0.25);border-radius:50%;animation:pulse 1.5s infinite 0.4s;"></div>
+        <div style="width:42px;height:42px;background:linear-gradient(135deg,#0EA5E9,#0284c7);border-radius:50%;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 0 18px rgba(14,165,233,0.7);position:relative;z-index:1;">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+        </div>
+      </div>
+    `;
+
+    const icon = L.divIcon({
+      html: iconHtml,
+      className: '',
+      iconSize: [42, 42],
+      iconAnchor: [21, 21],
+    });
+
+    const popupContent = `
+      <div style="background:#111827;color:white;border-radius:12px;padding:12px;min-width:180px;border:1px solid rgba(14,165,233,0.3);font-family:system-ui,sans-serif;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <div style="width:32px;height:32px;background:linear-gradient(135deg,#0EA5E9,#0284c7);border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 0 10px rgba(14,165,233,0.5);">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg>
+          </div>
+          <div>
+            <div style="font-weight:700;font-size:12px;color:#0EA5E9">${lang === 'EN' ? 'You (Cardiologist)' : 'Vous (Cardiologue)'}</div>
+            <div style="color:#6B7280;font-size:10px">${lat.toFixed(5)}°N, ${lng.toFixed(5)}°E</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:20px;font-size:10px;font-weight:700;background:rgba(14,165,233,0.15);color:#0EA5E9;border:1px solid rgba(14,165,233,0.3);">
+          <span style="width:6px;height:6px;border-radius:50%;background:#0EA5E9;display:inline-block;animation:pulse 1s infinite;"></span>
+          ${lang === 'EN' ? 'Live position' : 'Position en direct'}
+        </div>
+      </div>
+    `;
+
+    doctorMarkerRef.current = L.marker([lat, lng], { icon }).addTo(map)
+      .bindPopup(popupContent, { maxWidth: 220, className: 'custom-popup' });
+
+    // Smoothly pan to doctor if first fix
+    map.flyTo([lat, lng], Math.max(map.getZoom(), 14), { duration: 1.5 });
+  }, [loc.position, loc.granted, lang, mapReady]);
 
   // ── Update patient markers when data changes ─────────────────────
   useEffect(() => {
@@ -382,13 +535,41 @@ export const MapPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <span className="text-base">🏥</span>
                 <span style={{ color: 'var(--cd-t4)' }}>
-                  {lang === 'EN' ? 'Hospitals' : 'Hôpitaux'} ({hospitalLocations.length})
+                  {lang === 'EN' ? 'Hospitals' : 'Hôpitaux'} ({pois.filter(p => p.type === 'hospital').length})
                 </span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-base">⚡</span>
-                <span style={{ color: 'var(--cd-t4)' }}>DEA ({aedLocations.length})</span>
+                <span style={{ color: 'var(--cd-t4)' }}>DEA ({pois.filter(p => p.type === 'aed').length})</span>
+                {loc.granted && pois.length > 0 && (
+                  <span className="text-[9px] px-1.5 py-0.5 rounded font-bold" style={{ background: 'rgba(16,185,129,0.15)', color: '#10B981', border: '1px solid rgba(16,185,129,0.3)' }}>OSM</span>
+                )}
               </div>
+              {loc.granted && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Navigation className="w-3 h-3 text-[#0EA5E9]" />
+                    <span style={{ color: 'var(--cd-t4)' }}>
+                      {lang === 'EN' ? 'You' : 'Vous'}
+                    </span>
+                  </div>
+                  {loc.position ? (
+                    <button
+                      onClick={() => {
+                        if (mapInstanceRef.current && loc.position) {
+                          mapInstanceRef.current.flyTo(loc.position, 15, { duration: 1 });
+                        }
+                      }}
+                      className="text-[10px] px-2 py-0.5 rounded-full font-medium transition-all"
+                      style={{ background: 'rgba(14,165,233,0.15)', color: '#0EA5E9', border: '1px solid rgba(14,165,233,0.3)' }}
+                    >
+                      {lang === 'EN' ? 'Center' : 'Centrer'}
+                    </button>
+                  ) : (
+                    <span className="text-[10px] animate-pulse" style={{ color: '#0EA5E9' }}>GPS…</span>
+                  )}
+                </div>
+              )}
             </div>
             <div className="pt-1.5" style={{ borderTop: '1px solid var(--cd-bd)' }}>
               <span className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>
