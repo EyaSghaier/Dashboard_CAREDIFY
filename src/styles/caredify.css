@@ -1,0 +1,177 @@
+/* ═══════════════════════════════════════════════════════
+   CAREDIFY — Theme Variables
+   ═══════════════════════════════════════════════════════ */
+
+/* Dark theme (default) */
+:root {
+  --cd-bg1: #0B1120;     /* page background */
+  --cd-bg2: #0D1526;     /* sidebar / header background */
+  --cd-bg3: #111827;     /* card / panel background */
+  --cd-bg4: #0B1120;     /* inset / input background */
+  --cd-bd: #1F2937;      /* border */
+  --cd-bd2: rgba(31, 41, 55, 0.5); /* soft border */
+  --cd-hv: #1F2937;      /* hover background */
+  --cd-hv2: #374151;     /* stronger hover */
+  --cd-t1: #F9FAFB;      /* primary text */
+  --cd-t2: #E5E7EB;      /* secondary text */
+  --cd-t3: #9CA3AF;      /* tertiary text */
+  --cd-t4: #6B7280;      /* muted text */
+  --cd-t5: #4B5563;      /* faint / placeholder text */
+  --cd-scrollbar-track: #0B1120;
+  --cd-scrollbar-thumb: #1F2937;
+  --cd-scrollbar-thumb-hover: #374151;
+}
+
+/* Light theme */
+[data-theme="light"] {
+  --cd-bg1: #F0F4F8;
+  --cd-bg2: #FFFFFF;
+  --cd-bg3: #FFFFFF;
+  --cd-bg4: #F8FAFC;
+  --cd-bd: #E2E8F0;
+  --cd-bd2: rgba(226, 232, 240, 0.6);
+  --cd-hv: #F1F5F9;
+  --cd-hv2: #E2E8F0;
+  --cd-t1: #0F172A;
+  --cd-t2: #1E293B;
+  --cd-t3: #475569;
+  --cd-t4: #64748B;
+  --cd-t5: #94A3B8;
+  --cd-scrollbar-track: #F0F4F8;
+  --cd-scrollbar-thumb: #CBD5E1;
+  --cd-scrollbar-thumb-hover: #94A3B8;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Global body styles
+   ═══════════════════════════════════════════════════════ */
+body {
+  background-color: var(--cd-bg1);
+  color: var(--cd-t1);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Range slider
+   ═══════════════════════════════════════════════════════ */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  cursor: pointer;
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.5);
+  cursor: pointer;
+  border: 2px solid #0EA5E9;
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 0 8px rgba(14, 165, 233, 0.5);
+  cursor: pointer;
+  border: 2px solid #0EA5E9;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Scrollbar
+   ═══════════════════════════════════════════════════════ */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--cd-scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--cd-scrollbar-thumb);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cd-scrollbar-thumb-hover);
+}
+
+/* ═══════════════════════════════════════════════════════
+   Leaflet overrides
+   ═══════════════════════════════════════════════════════ */
+.leaflet-popup-content-wrapper {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border-radius: 0 !important;
+}
+
+.leaflet-popup-tip-container {
+  display: none !important;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+}
+
+.leaflet-container {
+  background: var(--cd-bg1) !important;
+  transition: background-color 0.2s ease;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Pulse animation for map markers
+   ═══════════════════════════════════════════════════════ */
+@keyframes pulse-ring {
+  0% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+
+.pulse-critical::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #EF444430;
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Theme transition for all themed elements
+   ═══════════════════════════════════════════════════════ */
+.cd-card,
+.cd-nav,
+.cd-input {
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+
+/* Light theme: give cards a subtle shadow instead of just border */
+[data-theme="light"] .cd-card-shadow {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+}
+
+/* ECG canvas light theme background */
+[data-theme="light"] canvas.ecg-canvas {
+  background-color: #F8FAFC;
+}
+
+/* Recharts axis text in light theme */
+[data-theme="light"] .recharts-cartesian-axis-tick-value {
+  fill: #475569 !important;
+}
+
+[data-theme="light"] .recharts-cartesian-grid-horizontal line,
+[data-theme="light"] .recharts-cartesian-grid-vertical line {
+  stroke: #E2E8F0 !important;
+}
