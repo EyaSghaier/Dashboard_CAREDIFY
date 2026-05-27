@@ -270,13 +270,14 @@ export const SignUpPage: React.FC = () => {
           // ✅ stocké avec préfixe +216
           phone:                  form.phone ? `+216${form.phone}` : null,
           role:                   'carediologue',
+          status:                 'pending',
         });
 
       if (profileError) console.warn('Profile upsert warning:', profileError.message);
 
-      console.log('✅ [SIGNUP] Registration successful, navigating to dashboard');
+      console.log('✅ [SIGNUP] Registration successful, navigating to pending-approval');
       setLoading(false);
-      navigate('/dashboard', { replace: true });
+      navigate('/pending-approval', { replace: true });
 
     } catch (err: any) {
       console.error('❌ [SIGNUP] Registration error:', err);

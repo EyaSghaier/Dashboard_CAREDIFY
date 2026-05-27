@@ -117,48 +117,61 @@ export const LoginPage: React.FC = () => {
   const DARK_MAIN  = '#0EA5E9';
   const accent     = isDark ? DARK_MAIN : LIGHT_BLUE;
 
-  // ✅ Appel direct Supabase + setLoading(false) dans tous les cas
+  // ─── Login : redirige selon role + status ────────────────────────────────
   const handleSubmit = async (e: React.SyntheticEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    // Create timeout promise (slow devices/network can take longer)
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('La demande de connexion a expiré. Veuillez réessayer.')), 30000);
-    });
-
     try {
-      // Race between the sign in request and timeout
-      const authPromise = supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-
-      const { data, error: signInError } = await Promise.race([authPromise, timeoutPromise]) as any;
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
 
       if (signInError) throw signInError;
+      if (!data.session) throw new Error('Aucune session créée.');
 
-      // Session may not be persisted immediately on some devices,
-      // but ProtectedLayout relies on getSession() timing.
-      const signInSession = data?.session ?? null;
-      const { data: sessionData } = await supabase.auth.getSession();
-      const session = sessionData?.session ?? signInSession;
+      const userId = data.session.user.id;
 
-      if (!session) {
-        throw new Error('Aucune session créée (session non disponible).');
+      // Charger le profil pour connaître role + status
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('role, status')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (profileError) {
+        console.warn('[LOGIN] Profile fetch error:', profileError.message);
       }
 
-      console.log(' [LOGIN] Authentication successful, navigating to dashboard');
-      setLoading(false); // ✅ reset avant navigate
-      navigate('/dashboard', { replace: true });
+      const role   = profileData?.role   ?? null;
+      const status = profileData?.status ?? null;
+
+      setLoading(false);
+
+      // Redirection admin (par rôle OU par email)
+      if (role === 'admin' || email.toLowerCase() === 'admin@caredify.tn') {
+        navigate('/admin/users', { replace: true });
+        return;
+      }
+
+      // Doctor (carediologue)
+      if (status === 'active') {
+        navigate('/dashboard', { replace: true });
+      } else if (status === 'suspended') {
+        navigate('/suspended', { replace: true });
+      } else if (status === 'rejected') {
+        navigate('/rejected', { replace: true });
+      } else {
+        // pending | verified | null → page d'attente
+        navigate('/pending-approval', { replace: true });
+      }
 
     } catch (err: any) {
       console.error('[LOGIN] Authentication error:', err);
-      const errorMsg = err.message || t.error;
-      setError(errorMsg);
-      setLoading(false); // ✅ toujours reset
+      const msg = err.message?.includes('Invalid login credentials')
+        ? t.error
+        : err.message || t.error;
+      setError(msg);
+      setLoading(false);
     }
   };
 

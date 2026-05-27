@@ -4,11 +4,11 @@ import {
   AlertTriangle, CheckCircle, XCircle, Bell,
   Filter, Eye, Clock, Loader2, RefreshCw,
   X, Heart, Droplet, Phone, Mail, User, Activity,
-  ChevronRight,
+  ChevronRight, FileText, Zap, Send,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { useLang } from '../context/LanguageContext';
- 
+
 // ── Types ──────────────────────────────────────────────────────────────────
 interface Alert {
   id: string;
@@ -23,7 +23,7 @@ interface Alert {
   aiScore: number;
   patientDetail?: PatientInfo | null;
 }
- 
+
 interface PatientInfo {
   blood_type: string | null;
   age: number | null;
@@ -36,7 +36,7 @@ interface PatientInfo {
   height: number | null;
   emergency_contact: string | null;
 }
- 
+
 interface EmergencyAlert {
   id: string;
   patient_id: string;
@@ -48,7 +48,7 @@ interface EmergencyAlert {
   ai_severity: 'critical' | 'warning' | null;
   patientDetail?: PatientInfo | null;
 }
- 
+
 // ── i18n ───────────────────────────────────────────────────────────────────
 const t = {
   FR: {
@@ -88,6 +88,16 @@ const t = {
     manualMessage: 'Le patient a déclenché une alerte manuelle.',
     years: 'ans',
     loadingPatient: 'Chargement des informations...',
+    // Confirm modal
+    confirmModalTitle: "Confirmer l'alerte",
+    confirmModalSubtitle: 'Ajoutez une note médicale ou une recommandation avant de confirmer.',
+    quickSuggestions: 'SUGGESTIONS RAPIDES',
+    personalNote: 'NOTE PERSONNALISÉE',
+    notePlaceholder: 'Ajoutez vos observations, recommandations ou plan de prise en charge...',
+    emergencyNotif: 'Alerte d\'urgence envoyée au patient',
+    cancel: 'Annuler',
+    confirmWithoutNote: 'Confirmer sans note',
+    confirmWithNote: 'Confirmer avec note',
   },
   EN: {
     title: 'Alerts Center',
@@ -126,16 +136,52 @@ const t = {
     manualMessage: 'Patient triggered a manual emergency alert.',
     years: 'yo',
     loadingPatient: 'Loading information...',
+    // Confirm modal
+    confirmModalTitle: 'Confirm Alert',
+    confirmModalSubtitle: 'Add a medical note or recommendation before confirming.',
+    quickSuggestions: 'QUICK SUGGESTIONS',
+    personalNote: 'PERSONAL NOTE',
+    notePlaceholder: 'Add your observations, recommendations or care plan...',
+    emergencyNotif: 'Emergency notification sent to patient',
+    cancel: 'Cancel',
+    confirmWithoutNote: 'Confirm without note',
+    confirmWithNote: 'Confirm with note',
   },
 };
- 
+
+const QUICK_SUGGESTIONS_FR = [
+  'Augmenter les diurétiques',
+  'ECG urgent requis',
+  'Contacter le patient',
+  'Hospitalisation à envisager',
+  "Ajuster l'anticoagulation",
+  'Échocardiographie planifiée',
+  'Surveillance rapprochée 24h',
+  'Consultation anesthésie',
+  'Bilan biologique urgent',
+  'Réduire les bétabloquants',
+];
+
+const QUICK_SUGGESTIONS_EN = [
+  'Increase diuretics',
+  'Urgent ECG required',
+  'Contact patient',
+  'Consider hospitalization',
+  'Adjust anticoagulation',
+  'Schedule echocardiography',
+  'Close 24h monitoring',
+  'Anesthesia consultation',
+  'Urgent blood work',
+  'Reduce beta-blockers',
+];
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 const statusToScore = (status: string | null): number => {
   if (status === 'critical') return Math.floor(75 + Math.random() * 25);
   if (status === 'warning') return Math.floor(50 + Math.random() * 24);
   return Math.floor(10 + Math.random() * 39);
 };
- 
+
 const statusToType = (status: string | null, lang: 'FR' | 'EN'): string => {
   if (lang === 'FR') {
     if (status === 'critical') return 'ECG Critique Détecté';
@@ -146,7 +192,7 @@ const statusToType = (status: string | null, lang: 'FR' | 'EN'): string => {
   if (status === 'warning') return 'ECG Warning';
   return 'Normal Status';
 };
- 
+
 const statusToMessage = (
   status: string | null,
   patientName: string,
@@ -166,348 +212,294 @@ const statusToMessage = (
     return `Abnormal ECG signal detected for ${patientName}. Heart rate: ${hr}.`;
   return '';
 };
- 
+
 const formatTs = (ts: string, lang: 'FR' | 'EN') =>
   new Date(ts).toLocaleTimeString(lang === 'FR' ? 'fr-FR' : 'en-US', {
     hour: '2-digit', minute: '2-digit',
   });
- 
-// ── Modal Overlay ──────────────────────────────────────────────────────────
-interface ModalData {
-  type: 'ecg' | 'emergency';
-  alert: Alert | EmergencyAlert;
-}
- 
-const AlertModal: React.FC<{
-  data: ModalData;
-  onClose: () => void;
-  onConfirm: () => void;
-  onDismiss: () => void;
-  onViewPatient?: () => void;
+
+// ── Confirm Modal (image 2 style) ──────────────────────────────────────────
+interface ConfirmModalProps {
+  patientName: string;
+  alertType: string;
+  aiScore: number;
+  severity: 'critical' | 'warning';
   lang: 'FR' | 'EN';
-  loadingPatient: boolean;
-}> = ({ data, onClose, onConfirm, onDismiss, onViewPatient, lang, loadingPatient }) => {
+  onConfirm: (note: string) => void;
+  onCancel: () => void;
+  onViewPatient?: () => void;
+}
+
+const ConfirmModal: React.FC<ConfirmModalProps> = ({
+  patientName, alertType, aiScore, severity, lang, onConfirm, onCancel, onViewPatient,
+}) => {
   const tr = t[lang];
-  const isEcg = data.type === 'ecg';
-  const alert = data.alert;
- 
-  const severity = isEcg
-    ? (alert as Alert).severity
-    : (alert as EmergencyAlert).ai_severity ?? 'critical';
- 
+  const [note, setNote] = useState('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const suggestions = lang === 'FR' ? QUICK_SUGGESTIONS_FR : QUICK_SUGGESTIONS_EN;
   const isCritical = severity === 'critical';
   const accentColor = isCritical ? '#EF4444' : '#F59E0B';
-  const patientName = isEcg ? (alert as Alert).patientName : (alert as EmergencyAlert).patient_name;
-  const heartRate = isEcg ? null : (alert as EmergencyAlert).heart_rate;
-  const aiScore = isEcg ? (alert as Alert).aiScore : (alert as EmergencyAlert).ai_score;
-  const pd = alert.patientDetail;
-  const isConfirmed = isEcg ? (alert as Alert).isConfirmed : null;
-  const initials = patientName.split(' ').map(n => n[0] ?? '').join('').toUpperCase().slice(0, 2);
- 
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev =>
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const finalNote = [
+    ...selectedTags,
+    ...(note.trim() ? [note.trim()] : []),
+  ].join(' | ');
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      style={{ backgroundColor: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(10px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
     >
       <div
-        className="relative w-full max-w-lg rounded-2xl overflow-hidden shadow-2xl"
-        style={{ backgroundColor: 'var(--cd-bg2)', border: `1px solid ${accentColor}40`, maxHeight: '90vh', overflowY: 'auto' }}
+        className="relative w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
+        style={{
+          backgroundColor: '#0F1623',
+          border: `1px solid ${accentColor}35`,
+          maxHeight: '92vh',
+          overflowY: 'auto',
+        }}
       >
-        {/* ── Top banner ── */}
-        <div
-          className="relative px-6 pt-8 pb-6"
-          style={{
-            background: `linear-gradient(135deg, ${accentColor}22 0%, transparent 60%)`,
-            borderBottom: `1px solid ${accentColor}30`,
-          }}
-        >
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 p-1.5 rounded-lg transition-colors"
-            style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)', color: 'var(--cd-t4)' }}
-          >
-            <X className="w-4 h-4" />
-          </button>
- 
-          <div className="flex items-center gap-2 mb-4">
-            <span
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase"
-              style={{ backgroundColor: `${accentColor}20`, color: accentColor, border: `1px solid ${accentColor}40` }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: accentColor }} />
-              {isCritical ? tr.critical : tr.warning}
-            </span>
-            {!isEcg && (
-              <span className="text-xs px-2 py-1 rounded-full" style={{ backgroundColor: 'var(--cd-bg3)', color: 'var(--cd-t4)', border: '1px solid var(--cd-bd)' }}>
-                {tr.manualEmergency}
-              </span>
-            )}
-          </div>
- 
-          <div className="flex items-center gap-4">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-white font-bold text-xl flex-shrink-0"
-              style={{
-                background: `linear-gradient(135deg, ${accentColor}, ${accentColor}99)`,
-                boxShadow: `0 0 24px ${accentColor}50`,
-              }}
-            >
-              {initials}
-            </div>
-            <div className="min-w-0">
-              <h2 className="font-bold text-xl truncate" style={{ color: 'var(--cd-t1)' }}>{patientName}</h2>
-              {isEcg && (
-                <p className="text-sm mt-0.5 truncate" style={{ color: accentColor }}>
-                  {(alert as Alert).type}
+        {/* Top accent bar */}
+        <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${accentColor}, ${accentColor}44)` }} />
+
+        {/* Header */}
+        <div className="px-5 pt-5 pb-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ backgroundColor: `${accentColor}15`, border: `1px solid ${accentColor}30` }}>
+                <FileText className="w-4 h-4" style={{ color: accentColor }} />
+              </div>
+              <div>
+                <h2 className="font-bold text-base text-white">{tr.confirmModalTitle}</h2>
+                <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  {tr.confirmModalSubtitle}
                 </p>
-              )}
-              {!isEcg && (
-                <p className="text-sm mt-0.5" style={{ color: accentColor }}>{tr.manualEmergency}</p>
-              )}
-              <p className="text-xs mt-1" style={{ color: 'var(--cd-t4)' }}>
-                <Clock className="w-3 h-3 inline mr-1" />
-                {isEcg ? (alert as Alert).timestamp : formatTs((alert as EmergencyAlert).triggered_at, lang)}
-              </p>
+              </div>
             </div>
+            <button
+              onClick={onCancel}
+              className="p-1.5 rounded-lg transition-colors"
+              style={{ backgroundColor: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.4)' }}
+            >
+              <X className="w-4 h-4" />
+            </button>
           </div>
         </div>
- 
-        {/* ── Body ── */}
-        <div className="px-6 py-5 space-y-5">
+
+        {/* Patient badge */}
+        <div className="mx-5 mt-4">
           <div
-            className="rounded-xl p-4"
-            style={{ backgroundColor: `${accentColor}10`, border: `1px solid ${accentColor}25` }}
+            className="rounded-xl px-4 py-3 flex items-center justify-between"
+            style={{
+              backgroundColor: `${accentColor}0D`,
+              border: `1px solid ${accentColor}25`,
+            }}
           >
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: accentColor }} />
-              <p className="text-sm leading-relaxed" style={{ color: 'var(--cd-t2)' }}>
-                {isEcg
-                  ? (alert as Alert).message
-                  : `${tr.manualMessage} ${heartRate ? `${tr.heartRate}: ${heartRate} bpm` : ''}`
-                }
-              </p>
+            <div className="flex items-center gap-2.5">
+              <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
+              <span className="font-bold text-sm text-white">{patientName}</span>
+              <span className="text-xs" style={{ color: accentColor }}>· {alertType}</span>
+            </div>
+            <span className="text-sm font-bold" style={{ color: accentColor }}>{Math.round(aiScore)}/100</span>
+          </div>
+        </div>
+
+        {/* Quick suggestions */}
+        <div className="px-5 mt-4">
+          <p className="text-xs font-bold tracking-widest mb-3" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            <Zap className="w-3 h-3 inline mr-1.5" style={{ color: '#F59E0B' }} />
+            {tr.quickSuggestions}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {suggestions.map((s) => {
+              const isSelected = selectedTags.includes(s);
+              return (
+                <button
+                  key={s}
+                  onClick={() => toggleTag(s)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-medium transition-all"
+                  style={isSelected ? {
+                    backgroundColor: `${accentColor}25`,
+                    border: `1px solid ${accentColor}60`,
+                    color: accentColor,
+                  } : {
+                    backgroundColor: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'rgba(255,255,255,0.6)',
+                  }}
+                >
+                  {s}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Personal note */}
+        <div className="px-5 mt-4">
+          <p className="text-xs font-bold tracking-widest mb-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            <FileText className="w-3 h-3 inline mr-1.5" />
+            {tr.personalNote}
+          </p>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder={tr.notePlaceholder}
+            rows={3}
+            className="w-full rounded-xl px-4 py-3 text-sm resize-none outline-none transition-all"
+            style={{
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              border: '1px solid rgba(255,255,255,0.1)',
+              color: 'rgba(255,255,255,0.85)',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = `${accentColor}50`; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)'; }}
+          />
+        </div>
+
+        {/* Emergency notif badge */}
+        {severity === 'critical' && (
+          <div className="mx-5 mt-3">
+            <div
+              className="rounded-xl px-4 py-2.5 flex items-center gap-2.5"
+              style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}
+            >
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 text-[#EF4444]" />
+              <span className="text-xs" style={{ color: 'rgba(239,68,68,0.8)' }}>{tr.emergencyNotif}</span>
             </div>
           </div>
- 
-          {aiScore !== null && (
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-xs font-medium" style={{ color: 'var(--cd-t4)' }}>{tr.aiScore}</span>
-                <span className="text-sm font-bold" style={{ color: accentColor }}>{Math.round(aiScore)}/100</span>
-              </div>
-              <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--cd-bg1)' }}>
-                <div
-                  className="h-full rounded-full transition-all duration-700"
-                  style={{ width: `${Math.round(aiScore)}%`, backgroundColor: accentColor }}
-                />
-              </div>
-            </div>
-          )}
- 
-          <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--cd-t4)' }}>
-              {tr.patientInfo}
-            </h3>
-            {loadingPatient ? (
-              <div className="flex items-center gap-2 py-4" style={{ color: 'var(--cd-t4)' }}>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span className="text-sm">{tr.loadingPatient}</span>
-              </div>
-            ) : pd ? (
-              <div className="grid grid-cols-2 gap-3">
-                {pd.blood_type && (
-                  <div
-                    className="col-span-2 rounded-xl p-3 flex items-center gap-3"
-                    style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}
-                  >
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
-                      style={{ backgroundColor: 'rgba(239,68,68,0.15)' }}>
-                      <Droplet className="w-4 h-4 text-[#EF4444]" />
-                    </div>
-                    <div>
-                      <p className="text-xs" style={{ color: 'var(--cd-t4)' }}>{tr.bloodType}</p>
-                      <p className="font-bold text-lg text-[#EF4444]">{pd.blood_type}</p>
-                    </div>
-                  </div>
-                )}
-                {pd.age && (
-                  <InfoPill icon={<User className="w-3.5 h-3.5" />} label={tr.age} value={`${pd.age} ${tr.years}`} />
-                )}
-                {pd.phone && (
-                  <InfoPill icon={<Phone className="w-3.5 h-3.5" />} label={tr.phone} value={pd.phone} />
-                )}
-                {pd.cardiac_pathology && (
-                  <div className="col-span-2">
-                    <InfoPill icon={<Activity className="w-3.5 h-3.5" />} label={tr.pathology} value={pd.cardiac_pathology} full />
-                  </div>
-                )}
-                {pd.weight && (
-                  <InfoPill icon={<Heart className="w-3.5 h-3.5" />} label={tr.weight} value={`${pd.weight} kg`} />
-                )}
-                {pd.height && (
-                  <InfoPill icon={<Heart className="w-3.5 h-3.5" />} label={tr.height} value={`${pd.height} cm`} />
-                )}
-                {pd.emergency_contact && (
-                  <div className="col-span-2">
-                    <InfoPill icon={<Phone className="w-3.5 h-3.5" />} label={tr.emergency} value={pd.emergency_contact} full accent="#F59E0B" />
-                  </div>
-                )}
-                {pd.allergies && (
-                  <div
-                    className="col-span-2 rounded-xl p-3"
-                    style={{ backgroundColor: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)' }}
-                  >
-                    <p className="text-xs font-medium text-[#F59E0B] mb-1">⚠ {tr.allergies}</p>
-                    <p className="text-xs" style={{ color: 'var(--cd-t3)' }}>{pd.allergies}</p>
-                  </div>
-                )}
-                {pd.medical_history && (
-                  <div className="col-span-2 rounded-xl p-3" style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
-                    <p className="text-xs font-medium mb-1" style={{ color: 'var(--cd-t4)' }}>{tr.history}</p>
-                    <p className="text-xs leading-relaxed" style={{ color: 'var(--cd-t3)' }}>{pd.medical_history}</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-xl p-4 text-center" style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
-                <p className="text-xs" style={{ color: 'var(--cd-t4)' }}>—</p>
-              </div>
-            )}
-          </div>
- 
-          <div className="flex items-center gap-3 pt-1">
-            {(isEcg ? isConfirmed === null : true) && (
-              <>
-                <button
-                  onClick={onConfirm}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
-                  style={{ backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', color: '#10B981' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.28)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.15)'; }}
-                >
-                  <CheckCircle className="w-4 h-4" />
-                  {tr.confirm}
-                </button>
-                <button
-                  onClick={onDismiss}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
-                  style={{ backgroundColor: 'rgba(239,68,68,0.10)', border: '1px solid rgba(239,68,68,0.3)', color: '#EF4444' }}
-                  onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.22)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.10)'; }}
-                >
-                  <XCircle className="w-4 h-4" />
-                  {tr.dismiss}
-                </button>
-              </>
-            )}
-            {isEcg && isConfirmed === true && (
-              <div className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium"
-                style={{ backgroundColor: 'rgba(16,185,129,0.08)', color: '#10B981', border: '1px solid rgba(16,185,129,0.2)' }}>
-                <CheckCircle className="w-4 h-4" />{tr.confirmed}
-              </div>
-            )}
-            {isEcg && isConfirmed === false && (
-              <div className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-medium"
-                style={{ backgroundColor: 'var(--cd-bg3)', color: 'var(--cd-t4)', border: '1px solid var(--cd-bd)' }}>
-                <XCircle className="w-4 h-4" />{tr.dismissed}
-              </div>
-            )}
-          </div>
- 
+        )}
+
+        {/* Actions */}
+        <div className="px-5 py-5 space-y-2.5 mt-1">
           {onViewPatient && (
             <button
               onClick={onViewPatient}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs transition-all"
-              style={{ background: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.2)', color: '#0EA5E9' }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(14,165,233,0.16)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(14,165,233,0.08)'; }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-medium transition-all"
+              style={{ backgroundColor: 'rgba(14,165,233,0.08)', border: '1px solid rgba(14,165,233,0.2)', color: '#0EA5E9' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(14,165,233,0.15)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(14,165,233,0.08)'; }}
             >
               <Eye className="w-3.5 h-3.5" />
               {tr.viewPatient}
               <ChevronRight className="w-3.5 h-3.5" />
             </button>
           )}
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={onCancel}
+              className="flex-1 py-3 rounded-xl text-sm font-medium transition-all"
+              style={{ backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.1)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.06)'; }}
+            >
+              {tr.cancel}
+            </button>
+            <button
+              onClick={() => onConfirm(finalNote)}
+              className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold transition-all"
+              style={{ backgroundColor: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.35)', color: '#10B981' }}
+              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.28)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.15)'; }}
+            >
+              <CheckCircle className="w-4 h-4" />
+              {finalNote ? tr.confirmWithNote : tr.confirmWithoutNote}
+            </button>
+          </div>
         </div>
       </div>
     </div>
   );
 };
- 
-const InfoPill: React.FC<{
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  full?: boolean;
-  accent?: string;
-}> = ({ icon, label, value, full, accent }) => (
-  <div
-    className={`rounded-xl p-3 ${full ? '' : ''}`}
-    style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}
-  >
-    <div className="flex items-center gap-1.5 mb-1" style={{ color: accent ?? 'var(--cd-t4)' }}>
-      {icon}
-      <span className="text-xs">{label}</span>
+
+// ── Dismiss confirmation modal ─────────────────────────────────────────────
+interface DismissModalProps {
+  patientName: string;
+  lang: 'FR' | 'EN';
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+const DismissModal: React.FC<DismissModalProps> = ({ patientName, lang, onConfirm, onCancel }) => {
+  const tr = t[lang];
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ backgroundColor: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+    >
+      <div
+        className="w-full max-w-sm rounded-2xl p-6 shadow-2xl"
+        style={{ backgroundColor: '#0F1623', border: '1px solid rgba(239,68,68,0.25)' }}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ backgroundColor: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.25)' }}>
+            <XCircle className="w-5 h-5 text-[#EF4444]" />
+          </div>
+          <div>
+            <h3 className="font-bold text-white text-sm">{tr.dismiss}</h3>
+            <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>{patientName}</p>
+          </div>
+        </div>
+        <p className="text-xs mb-5" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          {lang === 'FR'
+            ? 'Êtes-vous sûr de vouloir ignorer cette alerte ?'
+            : 'Are you sure you want to dismiss this alert?'}
+        </p>
+        <div className="flex gap-2.5">
+          <button
+            onClick={onCancel}
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium"
+            style={{ backgroundColor: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}
+          >
+            {tr.cancel}
+          </button>
+          <button
+            onClick={onConfirm}
+            className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white"
+            style={{ backgroundColor: 'rgba(239,68,68,0.2)', border: '1px solid rgba(239,68,68,0.35)' }}
+          >
+            {tr.dismiss}
+          </button>
+        </div>
+      </div>
     </div>
-    <p className="text-sm font-medium truncate" style={{ color: 'var(--cd-t1)' }}>{value}</p>
-  </div>
-);
- 
+  );
+};
+
 // ── Main Component ─────────────────────────────────────────────────────────
 export const AlertsPage: React.FC = () => {
   const navigate = useNavigate();
   const { lang } = useLang();
   const tr = t[lang];
- 
+
   const [alertList, setAlertList] = useState<Alert[]>([]);
   const [emergencyAlerts, setEmergencyAlerts] = useState<EmergencyAlert[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'unread' | 'critical' | 'warning'>('all');
-
-  // ── CORRECTION : compteur des urgences confirmées ─────────────────
   const [confirmedEmergencyCount, setConfirmedEmergencyCount] = useState(0);
-  // ─────────────────────────────────────────────────────────────────
- 
-  const [modalData, setModalData] = useState<ModalData | null>(null);
-  const [loadingPatient, setLoadingPatient] = useState(false);
- 
-  const fetchPatientDetail = async (patientId: string): Promise<PatientInfo | null> => {
-    try {
-      const { data, error } = await supabase
-        .from('patients')
-        .select('blood_type, age, phone, email, cardiac_pathology, allergies, medical_history, weight, height, emergency_contact')
-        .eq('id', patientId)
-        .single();
-      if (error) throw error;
-      return data as PatientInfo;
-    } catch {
-      return null;
-    }
-  };
- 
-  const openAlertModal = async (alert: Alert) => {
-    setAlertList(prev => prev.map(a => a.id === alert.id ? { ...a, isRead: true } : a));
-    setModalData({ type: 'ecg', alert });
-    if (!alert.patientDetail) {
-      setLoadingPatient(true);
-      const pd = await fetchPatientDetail(alert.patientId);
-      setAlertList(prev => prev.map(a => a.id === alert.id ? { ...a, patientDetail: pd } : a));
-      setModalData(prev => prev ? { ...prev, alert: { ...prev.alert, patientDetail: pd } } : null);
-      setLoadingPatient(false);
-    }
-  };
- 
-  const openEmergencyModal = async (ea: EmergencyAlert) => {
-    setModalData({ type: 'emergency', alert: ea });
-    if (!ea.patientDetail) {
-      setLoadingPatient(true);
-      const pd = await fetchPatientDetail(ea.patient_id);
-      setEmergencyAlerts(prev => prev.map(a => a.id === ea.id ? { ...a, patientDetail: pd } : a));
-      setModalData(prev => prev ? { ...prev, alert: { ...prev.alert, patientDetail: pd } } : null);
-      setLoadingPatient(false);
-    }
-  };
- 
+
+  // Pending action state
+  const [pendingAction, setPendingAction] = useState<{
+    type: 'confirm' | 'dismiss';
+    alertType: 'ecg' | 'emergency';
+    alertId: string;
+    patientId?: string;
+    patientName: string;
+    alertLabel: string;
+    aiScore: number;
+    severity: 'critical' | 'warning';
+  } | null>(null);
+
   const fetchAlerts = useCallback(async () => {
     try {
       const { data: ecgData, error } = await supabase
@@ -519,9 +511,9 @@ export const AlertsPage: React.FC = () => {
         .in('status', ['critical', 'warning'])
         .order('timestamp', { ascending: false })
         .limit(50);
- 
+
       if (error) throw error;
- 
+
       const built: Alert[] = (ecgData ?? [])
         .filter((e) => e.patients)
         .map((e) => {
@@ -542,13 +534,13 @@ export const AlertsPage: React.FC = () => {
             patientDetail: null,
           };
         });
- 
+
       setAlertList(built);
     } catch (err) {
       console.error('Erreur chargement alertes:', err);
     }
   }, [lang]);
- 
+
   const fetchEmergencyAlerts = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -556,14 +548,14 @@ export const AlertsPage: React.FC = () => {
         .select('id, patient_id, patient_name, status, triggered_at, heart_rate, ai_score, ai_severity')
         .eq('status', 'pending')
         .order('triggered_at', { ascending: false });
- 
+
       if (error) throw error;
       setEmergencyAlerts((data ?? []).map(d => ({ ...d, patientDetail: null })));
     } catch (err) {
       console.error('Erreur chargement alertes urgence:', err);
     }
   }, []);
- 
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -574,46 +566,44 @@ export const AlertsPage: React.FC = () => {
     const interval = setInterval(loadData, 30000);
     return () => clearInterval(interval);
   }, [fetchAlerts, fetchEmergencyAlerts]);
- 
-  const handleModalConfirm = () => {
-    if (!modalData) return;
-    if (modalData.type === 'ecg') {
-      const id = (modalData.alert as Alert).id;
-      setAlertList(prev => prev.map(a => a.id === id ? { ...a, isConfirmed: true, isRead: true } : a));
-      setModalData(prev => prev ? { ...prev, alert: { ...prev.alert, isConfirmed: true } } : null);
+
+  // ── Confirm (after modal submit) ─────────────────────────────────────────
+  const executeConfirm = (note: string) => {
+    if (!pendingAction) return;
+    if (pendingAction.alertType === 'ecg') {
+      setAlertList(prev => prev.map(a =>
+        a.id === pendingAction.alertId ? { ...a, isConfirmed: true, isRead: true } : a
+      ));
     } else {
-      const id = (modalData.alert as EmergencyAlert).id;
       supabase.from('emergency_alerts')
         .update({ status: 'confirmed', responded_at: new Date().toISOString() })
-        .eq('id', id).then(() => {
-          setEmergencyAlerts(prev => prev.filter(a => a.id !== id));
-          // ── CORRECTION : incrémenter le compteur "Confirmées" ──────
+        .eq('id', pendingAction.alertId).then(() => {
+          setEmergencyAlerts(prev => prev.filter(a => a.id !== pendingAction.alertId));
           setConfirmedEmergencyCount(prev => prev + 1);
-          // ──────────────────────────────────────────────────────────
-          setModalData(null);
         });
     }
+    setPendingAction(null);
   };
- 
-  const handleModalDismiss = () => {
-    if (!modalData) return;
-    if (modalData.type === 'ecg') {
-      const id = (modalData.alert as Alert).id;
-      setAlertList(prev => prev.map(a => a.id === id ? { ...a, isConfirmed: false, isRead: true } : a));
-      setModalData(prev => prev ? { ...prev, alert: { ...prev.alert, isConfirmed: false } } : null);
+
+  // ── Dismiss (after modal submit) ─────────────────────────────────────────
+  const executeDismiss = () => {
+    if (!pendingAction) return;
+    if (pendingAction.alertType === 'ecg') {
+      setAlertList(prev => prev.map(a =>
+        a.id === pendingAction.alertId ? { ...a, isConfirmed: false, isRead: true } : a
+      ));
     } else {
-      const id = (modalData.alert as EmergencyAlert).id;
       supabase.from('emergency_alerts')
         .update({ status: 'cancelled', responded_at: new Date().toISOString() })
-        .eq('id', id).then(() => {
-          setEmergencyAlerts(prev => prev.filter(a => a.id !== id));
-          setModalData(null);
+        .eq('id', pendingAction.alertId).then(() => {
+          setEmergencyAlerts(prev => prev.filter(a => a.id !== pendingAction.alertId));
         });
     }
+    setPendingAction(null);
   };
- 
+
   const markAllRead = () => setAlertList(prev => prev.map(a => ({ ...a, isRead: true })));
- 
+
   const filtered = alertList.filter((a) => {
     if (filter === 'unread') return !a.isRead;
     if (filter === 'critical') return a.severity === 'critical';
@@ -621,32 +611,42 @@ export const AlertsPage: React.FC = () => {
     return true;
   });
 
-  // ── CORRECTION : compteurs incluant les alertes d'urgence ─────────
   const unreadCount = alertList.filter(a => !a.isRead).length + emergencyAlerts.length;
   const criticalCount = alertList.filter(a => a.severity === 'critical' && a.isConfirmed === null).length + emergencyAlerts.length;
   const confirmedCount = alertList.filter(a => a.isConfirmed === true).length + confirmedEmergencyCount;
-  // ─────────────────────────────────────────────────────────────────
- 
+
   return (
     <>
-      {modalData && (
-        <AlertModal
-          data={modalData}
-          onClose={() => setModalData(null)}
-          onConfirm={handleModalConfirm}
-          onDismiss={handleModalDismiss}
+      {/* Confirm modal */}
+      {pendingAction?.type === 'confirm' && (
+        <ConfirmModal
+          patientName={pendingAction.patientName}
+          alertType={pendingAction.alertLabel}
+          aiScore={pendingAction.aiScore}
+          severity={pendingAction.severity}
+          lang={lang}
+          onConfirm={executeConfirm}
+          onCancel={() => setPendingAction(null)}
           onViewPatient={
-            modalData.type === 'ecg'
-              ? () => { navigate(`/patients/${(modalData.alert as Alert).patientId}`); setModalData(null); }
+            pendingAction.patientId
+              ? () => { navigate(`/patients/${pendingAction.patientId}`); setPendingAction(null); }
               : undefined
           }
-          lang={lang}
-          loadingPatient={loadingPatient}
         />
       )}
- 
+
+      {/* Dismiss modal */}
+      {pendingAction?.type === 'dismiss' && (
+        <DismissModal
+          patientName={pendingAction.patientName}
+          lang={lang}
+          onConfirm={executeDismiss}
+          onCancel={() => setPendingAction(null)}
+        />
+      )}
+
       <div className="p-4 lg:p-6 space-y-5 overflow-hidden">
- 
+
         {/* Header */}
         <div className="flex items-center justify-between flex-shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -672,14 +672,14 @@ export const AlertsPage: React.FC = () => {
             </button>
           </div>
         </div>
- 
+
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3 flex-shrink-0">
           <StatCard color="#EF4444" icon={<AlertTriangle className="w-4 h-4 text-[#EF4444]" />} value={criticalCount} label={tr.statCritical} />
           <StatCard color="#F59E0B" icon={<Bell className="w-4 h-4 text-[#F59E0B]" />} value={unreadCount} label={tr.statUnread} />
           <StatCard color="#10B981" icon={<CheckCircle className="w-4 h-4 text-[#10B981]" />} value={confirmedCount} label={tr.statConfirmed} />
         </div>
- 
+
         {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
           <Filter className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--cd-t4)' }} />
@@ -705,7 +705,7 @@ export const AlertsPage: React.FC = () => {
             {tr.alertCount(filtered.length + emergencyAlerts.length)}
           </span>
         </div>
- 
+
         {/* Loading */}
         {loading ? (
           <div className="flex items-center justify-center gap-3 py-20" style={{ color: 'var(--cd-t4)' }}>
@@ -714,7 +714,7 @@ export const AlertsPage: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-4 overflow-y-auto max-h-[calc(100vh-280px)] pr-1">
- 
+
             {/* Emergency alerts */}
             {emergencyAlerts.length > 0 && (
               <div className="space-y-3">
@@ -723,7 +723,7 @@ export const AlertsPage: React.FC = () => {
                   {tr.emergencyAlerts}
                 </h3>
                 {emergencyAlerts.map((ea) => (
-                  <ClickableAlertCard
+                  <AlertCard
                     key={ea.id}
                     patientName={ea.patient_name}
                     type={lang === 'FR' ? 'Alerte manuelle urgente' : 'Manual Emergency Alert'}
@@ -733,20 +733,39 @@ export const AlertsPage: React.FC = () => {
                     }
                     timestamp={formatTs(ea.triggered_at, lang)}
                     severity="critical"
-                    aiScore={ea.ai_score ?? undefined}
+                    aiScore={ea.ai_score ?? 80}
                     isRead={false}
                     isConfirmed={null}
-                    clickLabel={tr.clickForDetails}
-                    onClick={() => openEmergencyModal(ea)}
+                    confirmLabel={tr.confirm}
+                    dismissLabel={tr.dismiss}
+                    onConfirm={() => setPendingAction({
+                      type: 'confirm',
+                      alertType: 'emergency',
+                      alertId: ea.id,
+                      patientId: ea.patient_id,
+                      patientName: ea.patient_name,
+                      alertLabel: lang === 'FR' ? 'Alerte manuelle urgente' : 'Manual Emergency Alert',
+                      aiScore: ea.ai_score ?? 80,
+                      severity: 'critical',
+                    })}
+                    onDismiss={() => setPendingAction({
+                      type: 'dismiss',
+                      alertType: 'emergency',
+                      alertId: ea.id,
+                      patientName: ea.patient_name,
+                      alertLabel: '',
+                      aiScore: 0,
+                      severity: 'critical',
+                    })}
                   />
                 ))}
               </div>
             )}
- 
+
             {/* ECG alerts */}
             <div className="space-y-3">
               {filtered.map((alert) => (
-                <ClickableAlertCard
+                <AlertCard
                   key={alert.id}
                   patientName={alert.patientName}
                   type={alert.type}
@@ -756,10 +775,35 @@ export const AlertsPage: React.FC = () => {
                   aiScore={alert.aiScore}
                   isRead={alert.isRead}
                   isConfirmed={alert.isConfirmed}
-                  clickLabel={tr.clickForDetails}
+                  confirmLabel={tr.confirm}
+                  dismissLabel={tr.dismiss}
                   confirmedLabel={tr.confirmed}
                   dismissedLabel={tr.dismissed}
-                  onClick={() => openAlertModal(alert)}
+                  onConfirm={() => {
+                    setAlertList(prev => prev.map(a => a.id === alert.id ? { ...a, isRead: true } : a));
+                    setPendingAction({
+                      type: 'confirm',
+                      alertType: 'ecg',
+                      alertId: alert.id,
+                      patientId: alert.patientId,
+                      patientName: alert.patientName,
+                      alertLabel: alert.type,
+                      aiScore: alert.aiScore,
+                      severity: alert.severity,
+                    });
+                  }}
+                  onDismiss={() => {
+                    setAlertList(prev => prev.map(a => a.id === alert.id ? { ...a, isRead: true } : a));
+                    setPendingAction({
+                      type: 'dismiss',
+                      alertType: 'ecg',
+                      alertId: alert.id,
+                      patientName: alert.patientName,
+                      alertLabel: alert.type,
+                      aiScore: alert.aiScore,
+                      severity: alert.severity,
+                    });
+                  }}
                 />
               ))}
               {filtered.length === 0 && emergencyAlerts.length === 0 && (
@@ -775,7 +819,7 @@ export const AlertsPage: React.FC = () => {
     </>
   );
 };
- 
+
 // ── StatCard ───────────────────────────────────────────────────────────────
 const StatCard: React.FC<{ color: string; icon: React.ReactNode; value: number; label: string }> = ({ color, icon, value, label }) => (
   <div className="rounded-xl p-4 flex items-center gap-3"
@@ -790,52 +834,51 @@ const StatCard: React.FC<{ color: string; icon: React.ReactNode; value: number; 
     </div>
   </div>
 );
- 
-// ── ClickableAlertCard ─────────────────────────────────────────────────────
-const ClickableAlertCard: React.FC<{
+
+// ── AlertCard (inline card with confirm/dismiss buttons) ───────────────────
+const AlertCard: React.FC<{
   patientName: string;
   type: string;
   message: string;
   timestamp: string;
   severity: 'critical' | 'warning';
-  aiScore?: number;
+  aiScore: number;
   isRead: boolean;
   isConfirmed: boolean | null;
-  clickLabel: string;
+  confirmLabel: string;
+  dismissLabel: string;
   confirmedLabel?: string;
   dismissedLabel?: string;
-  onClick: () => void;
-}> = ({ patientName, type, message, timestamp, severity, aiScore, isRead, isConfirmed, clickLabel, confirmedLabel, dismissedLabel, onClick }) => {
+  onConfirm: () => void;
+  onDismiss: () => void;
+}> = ({
+  patientName, type, message, timestamp, severity, aiScore,
+  isRead, isConfirmed, confirmLabel, dismissLabel,
+  confirmedLabel, dismissedLabel, onConfirm, onDismiss,
+}) => {
   const isCritical = severity === 'critical';
   const accentColor = isCritical ? '#EF4444' : '#F59E0B';
- 
+
   return (
-    <button
-      onClick={onClick}
-      className={`w-full text-left relative rounded-xl p-4 transition-all group ${isConfirmed === true ? 'opacity-60' : ''}`}
+    <div
+      className={`relative rounded-xl p-4 transition-all ${isConfirmed === true ? 'opacity-60' : ''}`}
       style={{
         backgroundColor: 'var(--cd-bg3)',
         border: '1px solid var(--cd-bd)',
         borderLeft: !isRead ? `3px solid ${accentColor}` : '1px solid var(--cd-bd)',
-        cursor: 'pointer',
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.borderColor = `${accentColor}50`; }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLElement).style.borderColor = isRead ? 'var(--cd-bd)' : accentColor;
-        (e.currentTarget as HTMLElement).style.borderLeftColor = !isRead ? accentColor : 'var(--cd-bd)';
       }}
     >
       {!isRead && (
         <span className="absolute top-4 right-4 w-2 h-2 rounded-full animate-pulse"
           style={{ backgroundColor: accentColor }} />
       )}
- 
+
       <div className="flex items-start gap-3 min-w-0">
         <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
           style={{ backgroundColor: `${accentColor}18` }}>
           <AlertTriangle className="w-4 h-4 flex-shrink-0" style={{ color: accentColor }} />
         </div>
- 
+
         <div className="flex-1 min-w-0">
           <div className="flex items-start justify-between gap-2 mb-1 flex-wrap">
             <div className="min-w-0 flex-1">
@@ -854,44 +897,59 @@ const ClickableAlertCard: React.FC<{
               <Clock className="w-3 h-3 flex-shrink-0" />{timestamp}
             </div>
           </div>
- 
+
           <p className="text-xs leading-relaxed mb-3 line-clamp-2" style={{ color: 'var(--cd-t3)' }}>
             {message}
           </p>
- 
-          {aiScore !== undefined && (
-            <div className="flex items-center gap-2 mb-3 flex-wrap">
-              <div className="w-20 h-1.5 rounded-full overflow-hidden flex-shrink-0"
-                style={{ backgroundColor: 'var(--cd-bd)' }}>
-                <div className="h-full rounded-full" style={{ width: `${aiScore}%`, backgroundColor: accentColor }} />
-              </div>
-              <span className="font-bold text-xs flex-shrink-0" style={{ color: accentColor }}>
-                {aiScore}/100
-              </span>
+
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <div className="w-20 h-1.5 rounded-full overflow-hidden flex-shrink-0"
+              style={{ backgroundColor: 'var(--cd-bd)' }}>
+              <div className="h-full rounded-full" style={{ width: `${aiScore}%`, backgroundColor: accentColor }} />
+            </div>
+            <span className="font-bold text-xs flex-shrink-0" style={{ color: accentColor }}>
+              {aiScore}/100
+            </span>
+          </div>
+
+          {/* Action buttons — shown when pending */}
+          {isConfirmed === null && (
+            <div className="flex items-center gap-2">
+              <button
+                onClick={onConfirm}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                style={{ backgroundColor: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.3)', color: '#10B981' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.22)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(16,185,129,0.12)'; }}
+              >
+                <CheckCircle className="w-3.5 h-3.5" />
+                {confirmLabel}
+              </button>
+              <button
+                onClick={onDismiss}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                style={{ backgroundColor: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.25)', color: '#EF4444' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.18)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(239,68,68,0.08)'; }}
+              >
+                <XCircle className="w-3.5 h-3.5" />
+                {dismissLabel}
+              </button>
             </div>
           )}
- 
-          <div className="flex items-center gap-2">
-            {isConfirmed === true && confirmedLabel && (
-              <span className="flex items-center gap-1 text-[#10B981] text-xs">
-                <CheckCircle className="w-3 h-3" />{confirmedLabel}
-              </span>
-            )}
-            {isConfirmed === false && dismissedLabel && (
-              <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--cd-t4)' }}>
-                <XCircle className="w-3 h-3" />{dismissedLabel}
-              </span>
-            )}
-            {isConfirmed === null && (
-              <span className="flex items-center gap-1 text-xs opacity-60 group-hover:opacity-100 transition-opacity"
-                style={{ color: accentColor }}>
-                <Eye className="w-3 h-3" />{clickLabel}
-                <ChevronRight className="w-3 h-3" />
-              </span>
-            )}
-          </div>
+
+          {isConfirmed === true && confirmedLabel && (
+            <span className="flex items-center gap-1 text-[#10B981] text-xs">
+              <CheckCircle className="w-3 h-3" />{confirmedLabel}
+            </span>
+          )}
+          {isConfirmed === false && dismissedLabel && (
+            <span className="flex items-center gap-1 text-xs" style={{ color: 'var(--cd-t4)' }}>
+              <XCircle className="w-3 h-3" />{dismissedLabel}
+            </span>
+          )}
         </div>
       </div>
-    </button>
+    </div>
   );
 };

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Heart, Activity, Thermometer, Droplet,
   Clock, Phone, Mail, Calendar, Download, Share2,
-  Stethoscope, Loader2, AlertTriangle,
+  Stethoscope, Loader2, AlertTriangle, CheckCircle, XCircle,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { RiskGauge } from '../components/RiskGauge';
@@ -28,6 +28,10 @@ interface PatientDetail {
   allergies: string | null;
   patient_id: string | null;
   created_at: string;
+  // ✅ Antécédents cardiaques
+  antecedent_infarctus: boolean | null;
+  antecedent_trouble_rythme: boolean | null;
+  antecedent_hospitalisation: boolean | null;
 }
 
 interface EcgReading {
@@ -52,6 +56,28 @@ const VitalCard: React.FC<{
     </div>
   </div>
 );
+
+// ✅ Composant antécédent Oui/Non avec icône
+const AntecedentRow: React.FC<{ label: string; value: boolean | null }> = ({ label, value }) => {
+  if (value === null) return null;
+  return (
+    <div className="flex items-center justify-between py-1.5">
+      <span className="text-xs" style={{ color: 'var(--cd-t3)' }}>{label}</span>
+      <span
+        className="flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full"
+        style={{
+          backgroundColor: value ? 'rgba(239,68,68,0.1)' : 'rgba(16,185,129,0.1)',
+          color: value ? '#EF4444' : '#10B981',
+        }}
+      >
+        {value
+          ? <><XCircle className="w-3 h-3" /> Oui</>
+          : <><CheckCircle className="w-3 h-3" /> Non</>
+        }
+      </span>
+    </div>
+  );
+};
 
 const RiskHistorySVG: React.FC<{ data: { date: string; score: number }[]; color: string }> = ({ data, color }) => {
   const [hovered, setHovered] = useState<number | null>(null);
@@ -102,7 +128,6 @@ const RiskHistorySVG: React.FC<{ data: { date: string; score: number }[]; color:
   );
 };
 
-// Convertir status ECG → score IA approximatif
 const statusToScore = (status: string | null): number => {
   if (status === 'critical') return Math.floor(75 + Math.random() * 25);
   if (status === 'warning')  return Math.floor(50 + Math.random() * 25);
@@ -129,13 +154,11 @@ export const PatientDetailPage: React.FC = () => {
     const fetch = async () => {
       setLoading(true);
       try {
-        // Patient
         const { data: p, error: pErr } = await supabase
           .from('patients').select('*').eq('id', id).single();
         if (pErr) throw pErr;
         setPatient(p);
 
-        // ECG readings (30 derniers)
         const { data: ecgs } = await supabase
           .from('ecg_readings')
           .select('*')
@@ -144,8 +167,6 @@ export const PatientDetailPage: React.FC = () => {
           .limit(30);
 
         setEcgList(ecgs ?? []);
-
-        // Score initial basé sur dernier ECG
         const lastScore = statusToScore(ecgs?.[0]?.status ?? null);
         setLiveScore(lastScore);
       } catch (err) {
@@ -157,7 +178,6 @@ export const PatientDetailPage: React.FC = () => {
     fetch();
   }, [id]);
 
-  // Simulation live score
   useEffect(() => {
     if (!patient) return;
     const interval = setInterval(() => {
@@ -189,13 +209,18 @@ export const PatientDetailPage: React.FC = () => {
     );
   }
 
-  const lastEcg    = ecgList[0] ?? null;
-  const riskClass  = getRiskFromStatus(lastEcg?.status ?? null);
-  const heartRate  = lastEcg?.heart_rate ?? 72;
-  const ecgColor   = riskClass === 'Critical' ? '#EF4444' : riskClass === 'At Risk' ? '#F59E0B' : '#10B981';
-  const initials   = `${patient.first_name?.[0] ?? ''}${patient.last_name?.[0] ?? ''}`.toUpperCase();
+  const lastEcg   = ecgList[0] ?? null;
+  const riskClass = getRiskFromStatus(lastEcg?.status ?? null);
+  const heartRate = lastEcg?.heart_rate ?? 72;
+  const ecgColor  = riskClass === 'Critical' ? '#EF4444' : riskClass === 'At Risk' ? '#F59E0B' : '#10B981';
+  const initials  = `${patient.first_name?.[0] ?? ''}${patient.last_name?.[0] ?? ''}`.toUpperCase();
 
-  // Historique 7 jours depuis les ECG
+  // ✅ Vérifie si au moins un antécédent est renseigné (non null)
+  const hasAntecedents =
+    patient.antecedent_infarctus !== null ||
+    patient.antecedent_trouble_rythme !== null ||
+    patient.antecedent_hospitalisation !== null;
+
   const riskHistory = (() => {
     const days: { date: string; score: number }[] = [];
     const grouped: Record<string, number[]> = {};
@@ -210,7 +235,6 @@ export const PatientDetailPage: React.FC = () => {
     return days;
   })();
 
-  // Timeline alertes depuis ECG critiques/warning
   const alertTimeline = ecgList
     .filter((e) => e.status === 'critical' || e.status === 'warning')
     .slice(0, 6)
@@ -220,6 +244,24 @@ export const PatientDetailPage: React.FC = () => {
       message: `ECG anormal détecté — Fréquence: ${e.heart_rate ?? '?'} bpm`,
       severity: (e.status === 'critical' ? 'critical' : 'warning') as 'critical' | 'warning' | 'info',
     }));
+
+  // ✅ Infos de base — on n'affiche que celles qui ont une valeur
+  const infoRows: { icon: React.ReactNode; label: string; value: string }[] = [
+    patient.age
+      ? { icon: <Calendar className="w-3.5 h-3.5" />, label: 'Âge', value: `${patient.age} ans` }
+      : null,
+    patient.cardiologist
+      ? { icon: <Stethoscope className="w-3.5 h-3.5" />, label: 'Cardiologue', value: patient.cardiologist }
+      : null,
+    patient.phone
+      ? { icon: <Phone className="w-3.5 h-3.5" />, label: 'Téléphone', value: patient.phone }
+      : null,
+    { icon: <Mail className="w-3.5 h-3.5" />, label: 'Email', value: patient.email },
+    patient.blood_type
+      ? { icon: <Droplet className="w-3.5 h-3.5" />, label: 'Groupe sanguin', value: patient.blood_type }
+      : null,
+    { icon: <Clock className="w-3.5 h-3.5" />, label: 'Enregistré', value: new Date(patient.created_at).toLocaleDateString('fr-FR') },
+  ].filter(Boolean) as { icon: React.ReactNode; label: string; value: string }[];
 
   return (
     <div className="p-4 lg:p-6 space-y-5">
@@ -287,33 +329,44 @@ export const PatientDetailPage: React.FC = () => {
                     color: ecgColor,
                     border: `1px solid ${ecgColor}25`,
                   }}>
-                  {riskClass === 'Critical' && <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: ecgColor }} />}
+                  {riskClass === 'Critical' && (
+                    <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: ecgColor }} />
+                  )}
                   {riskClass === 'Critical' ? 'CRITIQUE' : riskClass === 'At Risk' ? 'À RISQUE' : 'NORMAL'}
                 </span>
               </div>
             </div>
 
+            {/* Infos de base — nulls masqués */}
             <div className="space-y-2.5 text-xs pt-4" style={{ borderTop: '1px solid var(--cd-bd)' }}>
-              {[
-                { icon: <Calendar className="w-3.5 h-3.5" />, label: 'Âge', value: patient.age ? `${patient.age} ans` : '—' },
-                { icon: <Stethoscope className="w-3.5 h-3.5" />, label: 'Cardiologue', value: patient.cardiologist ?? '—' },
-                { icon: <Phone className="w-3.5 h-3.5" />, label: 'Téléphone', value: patient.phone ?? '—' },
-                { icon: <Mail className="w-3.5 h-3.5" />, label: 'Email', value: patient.email },
-                { icon: <Droplet className="w-3.5 h-3.5" />, label: 'Groupe sanguin', value: patient.blood_type ?? '—' },
-                { icon: <Clock className="w-3.5 h-3.5" />, label: 'Enregistré', value: new Date(patient.created_at).toLocaleDateString('fr-FR') },
-              ].map(({ icon, label, value }) => (
+              {infoRows.map(({ icon, label, value }) => (
                 <div key={label} className="flex items-center gap-2">
                   <div style={{ color: 'var(--cd-t4)' }}>{icon}</div>
-                  <span className="w-24 flex-shrink-0" style={{ color: 'var(--cd-t5)' }}>{label}:</span>
+                  <span className="w-24 flex-shrink-0" style={{ color: 'var(--cd-t5)' }}>{label} :</span>
                   <span className="truncate" style={{ color: 'var(--cd-t3)' }}>{value}</span>
                 </div>
               ))}
             </div>
 
-            {/* Antécédents */}
+            {/* ✅ Antécédents cardiaques Oui/Non — section masquée si tout est null */}
+            {hasAntecedents && (
+              <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--cd-bd)' }}>
+                <p className="text-xs font-semibold mb-2 flex items-center gap-1.5" style={{ color: 'var(--cd-t2)' }}>
+                  <Heart className="w-3.5 h-3.5 text-[#EF4444]" />
+                  Antécédents cardiaques
+                </p>
+                <div className="divide-y" style={{ borderColor: 'var(--cd-bd)' }}>
+                  <AntecedentRow label="Infarctus du myocarde" value={patient.antecedent_infarctus} />
+                  <AntecedentRow label="Trouble du rythme" value={patient.antecedent_trouble_rythme} />
+                  <AntecedentRow label="Hospitalisation cardiaque" value={patient.antecedent_hospitalisation} />
+                </div>
+              </div>
+            )}
+
+            {/* Antécédents texte */}
             {patient.medical_history && (
               <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--cd-bd)' }}>
-                <p className="text-xs font-medium mb-1" style={{ color: 'var(--cd-t4)' }}>Antécédents</p>
+                <p className="text-xs font-medium mb-1" style={{ color: 'var(--cd-t4)' }}>Historique médical</p>
                 <p className="text-xs leading-relaxed" style={{ color: 'var(--cd-t3)' }}>{patient.medical_history}</p>
               </div>
             )}
