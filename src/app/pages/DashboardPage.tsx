@@ -113,6 +113,9 @@ export const DashboardPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(new Date());
 
+  // ── CORRECTION : compteur des alertes d'urgence pending ──────────
+  const [emergencyCount, setEmergencyCount] = useState(0);
+
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
@@ -198,6 +201,15 @@ export const DashboardPage: React.FC = () => {
         };
       });
       setTrendData(trend);
+
+      // ── CORRECTION : fetch emergency_alerts pending ───────────────
+      const { count: emCount } = await supabase
+        .from('emergency_alerts')
+        .select('*', { count: 'exact', head: true })
+        .eq('status', 'pending');
+      setEmergencyCount(emCount ?? 0);
+      // ─────────────────────────────────────────────────────────────
+
       setLastUpdate(new Date());
     } catch (err) {
       console.error('Dashboard fetch error:', err);
@@ -217,7 +229,11 @@ export const DashboardPage: React.FC = () => {
   const criticalCount = criticalPts.length;
   const atRiskCount = patients.filter((p) => getRisk(p.lastEcg?.status ?? null) === 'At Risk').length;
   const normalCount = patients.filter((p) => getRisk(p.lastEcg?.status ?? null) === 'Normal').length;
-  const activeAlerts = criticalCount;
+
+  // ── CORRECTION : activeAlerts = ECG critiques + urgences pending ─
+  const activeAlerts = criticalCount + emergencyCount;
+  // ────────────────────────────────────────────────────────────────
+
   const avgScore = patients.length
     ? Math.round(patients.reduce((s, p) => s + toScore(p.lastEcg?.status ?? null), 0) / patients.length)
     : 0;
