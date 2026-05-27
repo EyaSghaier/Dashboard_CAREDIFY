@@ -1,13 +1,31 @@
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router';
-import { Mail, Loader2, Sun, Moon, ArrowLeft, CheckCircle } from 'lucide-react';
+import { Mail, ArrowLeft, Sun, Moon, Loader2, CheckCircle } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLang } from '../context/LanguageContext';
 import { CaredifyLogoIcon } from '../components/CaredifyLogo';
 
-const PERIOD = 260; const COPIES = 10; const VB_W = PERIOD * COPIES; const VB_H = 80; const MID = VB_H / 2;
-const seg = (t: number): number => { const tt = ((t % PERIOD) + PERIOD) % PERIOD; if (tt < 70) return 0; if (tt < 82) return -((tt - 70) / 12) * 12; if (tt < 94) return -12 + ((tt - 82) / 12) * 12; if (tt < 104) return ((tt - 94) / 10) * 48; if (tt < 109) return 48 - ((tt - 104) / 5) * 62; if (tt < 117) return -14 + ((tt - 109) / 8) * 20; if (tt < 127) return 6 - ((tt - 117) / 10) * 6; if (tt < 140) return ((tt - 127) / 13) * 10; if (tt < 158) return 10 - ((tt - 140) / 18) * 10; return 0; };
+const VB_W = 1600;
+const VB_H = 90;
+const MID = VB_H / 2;
+const PERIOD = 240;
+
+const seg = (tt: number): number => {
+  if (tt < 20 || tt >= 158) return 0;
+  if (tt < 32) return ((tt - 20) / 12) * 8;
+  if (tt < 42) return 8 - ((tt - 32) / 10) * 8;
+  if (tt < 70) return 0;
+  if (tt < 82) return -((tt - 70) / 12) * 12;
+  if (tt < 94) return -12 + ((tt - 82) / 12) * 12;
+  if (tt < 104) return ((tt - 94) / 10) * 48;
+  if (tt < 109) return 48 - ((tt - 104) / 5) * 62;
+  if (tt < 117) return -14 + ((tt - 109) / 8) * 20;
+  if (tt < 127) return 6 - ((tt - 117) / 10) * 6;
+  if (tt < 140) return ((tt - 127) / 13) * 10;
+  if (tt < 158) return 10 - ((tt - 140) / 18) * 10;
+  return 0;
+};
 
 const BGECGLine: React.FC<{ color: string }> = ({ color }) => {
   const pts = useMemo(() => Array.from({ length: VB_W / 2 }, (_, i) => { const x = i * 2; return `${x},${(MID + seg(x)).toFixed(1)}`; }).join(' '), []);

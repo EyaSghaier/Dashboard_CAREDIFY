@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../../lib/supabase';
+import type { UserStatus } from '../../lib/supabase';
 
 export interface Profile {
   id: string;
@@ -11,6 +12,8 @@ export interface Profile {
   specialty: string | null;
   phone: string | null;
   role: string | null;
+  /** Statut du compte — utilisé pour les guards de routes */
+  status: UserStatus | null;
   created_at: string;
   updated_at?: string;
 }
@@ -49,6 +52,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           hospital_clinic,
           medical_license_number,
           role,
+          status,
           created_at,
           updated_at
         `)

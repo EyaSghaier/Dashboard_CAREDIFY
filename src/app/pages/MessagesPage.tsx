@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Search, Phone, Video, MoreVertical,
-  Paperclip, Smile, Loader2, CheckCheck,
+  Paperclip, Smile, Loader2, CheckCheck, Star,
 } from 'lucide-react';
 import { useLang } from '../context/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -13,27 +13,31 @@ interface Message {
   senderId: string;
   content: string;
   timestamp: string;
-  isFromDoctor: boolean;
+  isFromMe: boolean;
   isRead: boolean;
 }
 
 interface Conversation {
-  id: string;           // patients.id = auth UUID du patient
-  patientName: string;
-  patientAvatar: string;
+  id: string;
+  name: string;
+  avatar: string;
   lastMessage: string;
   lastTime: string;
   unread: number;
   messages: Message[];
-  conversationId: string; // sort([doctorId, patientId]).join('_')
+  conversationId: string;
+  isMyPatient: boolean; // étoile dorée si patient attitré
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-const initials = (fn: string, ln: string) =>
-  `${fn?.[0] ?? ''}${ln?.[0] ?? ''}`.toUpperCase();
+const initials = (name: string) => {
+  const parts = name.trim().split(' ');
+  return parts.length >= 2
+    ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+    : name.slice(0, 2).toUpperCase();
+};
 
-const buildConvId = (a: string, b: string) =>
-  [a, b].sort().join('_');
+const buildConvId = (a: string, b: string) => [a, b].sort().join('_');
 
 const fmtTime = (iso: string, lang: 'FR' | 'EN') =>
   new Date(iso).toLocaleTimeString(lang === 'FR' ? 'fr-FR' : 'en-US', {
@@ -51,64 +55,189 @@ export const MessagesPage: React.FC = () => {
   const [inputText, setInputText]     = useState('');
   const [search, setSearch]           = useState('');
 
-  // ✅ Refs pour éviter les closures stale
-  const doctorUidRef  = useRef<string>('');
-  const selectedIdRef = useRef<string>('');
-  const convosRef     = useRef<Conversation[]>([]);
+  const doctorUidRef   = useRef<string>('');
+  const selectedIdRef  = useRef<string>('');
+  const convosRef      = useRef<Conversation[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const channelRef     = useRef<RealtimeChannel | null>(null);
 
-  // Sync refs
-  useEffect(() => { selectedIdRef.current = selectedId; },  [selectedId]);
-  useEffect(() => { convosRef.current     = convos; },      [convos]);
+  useEffect(() => { selectedIdRef.current = selectedId; }, [selectedId]);
+  useEffect(() => { convosRef.current     = convos; },     [convos]);
 
   const selectedConvo = convos.find((c) => c.id === selectedId);
 
-  // ── 1. Charger patients du cardiologue ──────────────────────────
+  // ── 1. Charger conversations ────────────────────────────────────
   useEffect(() => {
-    const fetchPatients = async () => {
+    const fetchAll = async () => {
       setLoading(true);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
-
-      // ✅ Stocker l'UUID du docteur dans le ref
       doctorUidRef.current = user.id;
-
-      // RLS filtre automatiquement — seulement SES patients
-      const { data: patients, error } = await supabase
-        .from('patients')
-        .select('id, first_name, last_name')
-        .order('last_name', { ascending: true });
-
-      if (error) {
-        console.error('Erreur chargement patients:', error);
-        setLoading(false);
-        return;
-      }
 
       const now = new Date().toLocaleTimeString(
         lang === 'FR' ? 'fr-FR' : 'en-US',
         { hour: '2-digit', minute: '2-digit' }
       );
 
-      const built: Conversation[] = (patients ?? []).map((p) => ({
-        id:             p.id,   // ✅ patients.id = auth UUID du patient
-        patientName:    `${p.first_name} ${p.last_name}`,
-        patientAvatar:  initials(p.first_name, p.last_name),
+      // ── A. Mes patients attitrés (RLS filtre automatiquement) ────
+      const { data: myPatients, error: pErr } = await supabase
+        .from('patients')
+        .select('id, first_name, last_name')
+        .order('last_name', { ascending: true });
+
+      if (pErr) console.error('Erreur patients:', pErr);
+
+      const myPatientIds = new Set((myPatients ?? []).map((p) => p.id));
+
+      // Map id → nom pour les patients attitrés
+      const myPatientMap = new Map(
+        (myPatients ?? []).map((p) => [
+          p.id,
+          `${p.first_name} ${p.last_name}`,
+        ])
+      );
+
+      // ── B. Patients ayant déjà envoyé un message au docteur ──────
+      // On récupère les conversations distinctes où receiver_id = doctorId
+      const { data: incomingMsgs, error: mErr } = await supabase
+        .from('messages')
+        .select('conversation_id, sender_id, content, created_at')
+        .eq('receiver_id', user.id)
+        .order('created_at', { ascending: false });
+
+      if (mErr) console.error('Erreur messages entrants:', mErr);
+
+      // Déduplication : garder le dernier message par sender
+      const seenSenders = new Set<string>();
+      const otherPatientMsgs: {
+        senderId: string;
+        convId: string;
+        lastContent: string;
+        lastTime: string;
+      }[] = [];
+
+      for (const m of incomingMsgs ?? []) {
+        const sid = m.sender_id as string;
+        // Exclure mes patients attitrés (déjà couverts) et moi-même
+        if (!seenSenders.has(sid) && !myPatientIds.has(sid) && sid !== user.id) {
+          seenSenders.add(sid);
+          otherPatientMsgs.push({
+            senderId:    sid,
+            convId:      m.conversation_id,
+            lastContent: m.content,
+            lastTime:    fmtTime(m.created_at, lang),
+          });
+        }
+      }
+
+      // Récupérer les noms des "autres patients" depuis profiles
+      const otherIds = otherPatientMsgs.map((m) => m.senderId);
+      let otherNamesMap = new Map<string, string>();
+
+      if (otherIds.length > 0) {
+        // Essayer d'abord dans patients (cas où le patient existe mais n'est pas attitré)
+        const { data: otherPatientsData } = await supabase
+          .from('patients')
+          .select('id, first_name, last_name')
+          .in('id', otherIds);
+
+        for (const p of otherPatientsData ?? []) {
+          otherNamesMap.set(p.id, `${p.first_name} ${p.last_name}`);
+        }
+
+        // Pour ceux non trouvés dans patients, chercher dans profiles
+        const missingIds = otherIds.filter((id) => !otherNamesMap.has(id));
+        if (missingIds.length > 0) {
+          const { data: profilesData } = await supabase
+            .from('profiles')
+            .select('id, full_name')
+            .in('id', missingIds);
+
+          for (const p of profilesData ?? []) {
+            otherNamesMap.set(p.id, p.full_name ?? 'Patient inconnu');
+          }
+        }
+      }
+
+      // ── C. Construire les Conversation[] ────────────────────────
+
+      // Patients attitrés
+      const myPatientConvos: Conversation[] = (myPatients ?? []).map((p) => ({
+        id:             p.id,
+        name:           `${p.first_name} ${p.last_name}`,
+        avatar:         initials(`${p.first_name} ${p.last_name}`),
         lastMessage:    lang === 'FR' ? 'Démarrer une conversation' : 'Start a conversation',
         lastTime:       now,
         unread:         0,
         messages:       [],
-        conversationId: buildConvId(user.id, p.id), // ✅ patients.id
+        conversationId: buildConvId(user.id, p.id),
+        isMyPatient:    true,
       }));
 
-      setConvos(built);
-      if (built.length > 0) setSelectedId(built[0].id);
+      // Autres patients (qui ont envoyé un message)
+      const otherConvos: Conversation[] = otherPatientMsgs.map((m) => ({
+        id:             m.senderId,
+        name:           otherNamesMap.get(m.senderId) ?? 'Patient inconnu',
+        avatar:         initials(otherNamesMap.get(m.senderId) ?? '?'),
+        lastMessage:    m.lastContent,
+        lastTime:       m.lastTime,
+        unread:         0,
+        messages:       [],
+        conversationId: m.convId,
+        isMyPatient:    false,
+      }));
+
+      const all = [...myPatientConvos, ...otherConvos];
+
+      // ── D. Enrichir : lastMessage + unread pour chaque conv ──────
+      const enriched = await Promise.all(
+        all.map(async (conv) => {
+          try {
+            const { data: lastMsgs } = await supabase
+              .from('messages')
+              .select('content, created_at')
+              .eq('conversation_id', conv.conversationId)
+              .order('created_at', { ascending: false })
+              .limit(1);
+
+            const { data: unreadData } = await supabase
+              .from('messages')
+              .select('id')
+              .eq('conversation_id', conv.conversationId)
+              .eq('receiver_id', user.id)
+              .eq('is_read', false);
+
+            const last = lastMsgs?.[0];
+            return {
+              ...conv,
+              lastMessage: last?.content     ?? conv.lastMessage,
+              lastTime:    last
+                ? fmtTime(last.created_at, lang)
+                : conv.lastTime,
+              unread: unreadData?.length ?? 0,
+            };
+          } catch {
+            return conv;
+          }
+        })
+      );
+
+      // ── E. Trier : patients attitrés en premier, puis par unread ─
+      enriched.sort((a, b) => {
+        if (a.isMyPatient && !b.isMyPatient) return -1;
+        if (!a.isMyPatient && b.isMyPatient) return 1;
+        if (b.unread !== a.unread) return b.unread - a.unread;
+        return a.name.localeCompare(b.name);
+      });
+
+      setConvos(enriched);
+      if (enriched.length > 0) setSelectedId(enriched[0].id);
       setLoading(false);
     };
 
-    fetchPatients();
+    fetchAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lang]);
 
   // ── 2. Charger historique quand conv sélectionnée ───────────────
@@ -131,17 +260,17 @@ export const MessagesPage: React.FC = () => {
         return;
       }
 
-      const doctorUid = doctorUidRef.current;
+      const myUid = doctorUidRef.current;
       const msgs: Message[] = (data ?? []).map((m) => ({
-        id:           m.id,
-        senderId:     m.sender_id,
-        content:      m.content,
-        timestamp:    fmtTime(m.created_at, lang),
-        isFromDoctor: m.sender_id === doctorUid,
-        isRead:       m.is_read,
+        id:        m.id,
+        senderId:  m.sender_id,
+        content:   m.content,
+        timestamp: fmtTime(m.created_at, lang),
+        isFromMe:  m.sender_id === myUid,
+        isRead:    m.is_read,
       }));
 
-      const unread   = msgs.filter((m) => !m.isFromDoctor && !m.isRead).length;
+      const unread   = msgs.filter((m) => !m.isFromMe && !m.isRead).length;
       const lastData = data?.[data.length - 1];
 
       setConvos((prev) =>
@@ -151,7 +280,7 @@ export const MessagesPage: React.FC = () => {
                 ...c,
                 messages:    msgs,
                 unread,
-                lastMessage: lastData?.content    ?? c.lastMessage,
+                lastMessage: lastData?.content ?? c.lastMessage,
                 lastTime:    lastData
                   ? fmtTime(lastData.created_at, lang)
                   : c.lastTime,
@@ -160,13 +289,12 @@ export const MessagesPage: React.FC = () => {
         )
       );
 
-      // Marquer les messages reçus comme lus
       if (data && data.length > 0) {
         await supabase
           .from('messages')
           .update({ is_read: true })
           .eq('conversation_id', selectedConvo.conversationId)
-          .eq('receiver_id', doctorUid)
+          .eq('receiver_id', myUid)
           .eq('is_read', false);
       }
 
@@ -177,18 +305,17 @@ export const MessagesPage: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  // ── 3. Realtime — écouter les nouveaux messages ─────────────────
+  // ── 3. Realtime ─────────────────────────────────────────────────
   useEffect(() => {
     if (!selectedConvo?.conversationId || !doctorUidRef.current) return;
 
-    // Désabonner l'ancien canal
     if (channelRef.current) {
       supabase.removeChannel(channelRef.current);
       channelRef.current = null;
     }
 
-    const convId    = selectedConvo.conversationId;
-    const doctorUid = doctorUidRef.current;
+    const convId = selectedConvo.conversationId;
+    const myUid  = doctorUidRef.current;
 
     const channel = supabase
       .channel(`conv:${convId}:${Date.now()}`)
@@ -202,62 +329,126 @@ export const MessagesPage: React.FC = () => {
         },
         (payload) => {
           const m = payload.new as {
-            id: string;
-            sender_id: string;
-            content: string;
-            created_at: string;
-            is_read: boolean;
+            id: string; sender_id: string; content: string;
+            created_at: string; is_read: boolean;
           };
-
-          const isFromDoctor = m.sender_id === doctorUid;
-
+          const isFromMe = m.sender_id === myUid;
           const newMsg: Message = {
-            id:           m.id,
-            senderId:     m.sender_id,
-            content:      m.content,
-            timestamp:    fmtTime(m.created_at, lang),
-            isFromDoctor,
-            isRead:       m.is_read,
+            id:        m.id,
+            senderId:  m.sender_id,
+            content:   m.content,
+            timestamp: fmtTime(m.created_at, lang),
+            isFromMe,
+            isRead:    m.is_read,
           };
 
-          const currentSelectedId = selectedIdRef.current;
+          setConvos((prev) => {
+            // Si la conversation existe déjà, on l'update
+            const exists = prev.some((c) => c.conversationId === convId);
+            if (exists) {
+              return prev.map((c) =>
+                c.conversationId === convId
+                  ? {
+                      ...c,
+                      messages:    [...c.messages, newMsg],
+                      lastMessage: newMsg.content,
+                      lastTime:    newMsg.timestamp,
+                      unread: (!isFromMe && c.id !== selectedIdRef.current)
+                        ? c.unread + 1 : c.unread,
+                    }
+                  : c
+              );
+            }
+            // Sinon, nouveau patient non attitré → l'ajouter dynamiquement
+            return prev;
+          });
 
-          setConvos((prev) =>
-            prev.map((c) =>
-              c.conversationId === convId
-                ? {
-                    ...c,
-                    messages:    [...c.messages, newMsg],
-                    lastMessage: newMsg.content,
-                    lastTime:    newMsg.timestamp,
-                    unread: (!isFromDoctor && c.id !== currentSelectedId)
-                      ? c.unread + 1
-                      : c.unread,
-                  }
-                : c
-            )
-          );
-
-          // Auto-marquer lu si message du patient et conv active
-          if (!isFromDoctor) {
-            supabase
-              .from('messages')
-              .update({ is_read: true })
-              .eq('id', m.id);
+          if (!isFromMe) {
+            supabase.from('messages').update({ is_read: true }).eq('id', m.id);
           }
         }
       )
-      .subscribe((status) => {
-        console.log(`Realtime [${convId}]:`, status);
-      });
+      .subscribe();
 
     channelRef.current = channel;
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConvo?.conversationId]);
+
+  // ── Realtime global : détecter nouveaux patients qui écrivent ───
+  useEffect(() => {
+    if (!doctorUidRef.current) return;
+
+    const myUid = doctorUidRef.current;
+
+    const globalChannel = supabase
+      .channel(`inbox:${myUid}`)
+      .on(
+        'postgres_changes',
+        {
+          event:  'INSERT',
+          schema: 'public',
+          table:  'messages',
+          filter: `receiver_id=eq.${myUid}`,
+        },
+        async (payload) => {
+          const m = payload.new as {
+            id: string; sender_id: string; content: string;
+            created_at: string; conversation_id: string;
+          };
+
+          const existsAlready = convosRef.current.some(
+            (c) => c.id === m.sender_id
+          );
+          if (existsAlready) return; // déjà géré par le canal de conv
+
+          // Nouveau patient inconnu → récupérer son nom et l'ajouter
+          let name = 'Patient inconnu';
+          const { data: pd } = await supabase
+            .from('patients')
+            .select('first_name, last_name')
+            .eq('id', m.sender_id)
+            .maybeSingle();
+
+          if (pd) {
+            name = `${pd.first_name} ${pd.last_name}`;
+          } else {
+            const { data: prof } = await supabase
+              .from('profiles')
+              .select('full_name')
+              .eq('id', m.sender_id)
+              .maybeSingle();
+            if (prof) name = prof.full_name ?? name;
+          }
+
+          const newConvo: Conversation = {
+            id:             m.sender_id,
+            name,
+            avatar:         initials(name),
+            lastMessage:    m.content,
+            lastTime:       fmtTime(m.created_at, doctorUidRef.current as unknown as 'FR' | 'EN'),
+            unread:         1,
+            messages:       [],
+            conversationId: m.conversation_id,
+            isMyPatient:    false,
+          };
+
+          setConvos((prev) => {
+            // Double-check
+            if (prev.some((c) => c.id === m.sender_id)) return prev;
+            // Insérer après les patients attitrés
+            const myIdx = prev.filter((c) => c.isMyPatient).length;
+            const next = [...prev];
+            next.splice(myIdx, 0, newConvo);
+            return next;
+          });
+        }
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(globalChannel); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── 4. Auto-scroll ──────────────────────────────────────────────
   useEffect(() => {
@@ -266,67 +457,50 @@ export const MessagesPage: React.FC = () => {
 
   // ── 5. Envoyer message ──────────────────────────────────────────
   const sendMessage = async () => {
-    const content   = inputText.trim();
-    const doctorUid = doctorUidRef.current;
-    const convo     = convosRef.current.find((c) => c.id === selectedIdRef.current);
-
-    if (!content || !convo || !doctorUid) {
-      console.warn('sendMessage bloqué:', {
-        hasContent:   !!content,
-        hasConvo:     !!convo,
-        hasDoctorUid: !!doctorUid,
-      });
-      return;
-    }
+    const content = inputText.trim();
+    const myUid   = doctorUidRef.current;
+    const convo   = convosRef.current.find((c) => c.id === selectedIdRef.current);
+    if (!content || !convo || !myUid) return;
 
     setInputText('');
-
     const { error } = await supabase.from('messages').insert({
       conversation_id: convo.conversationId,
-      sender_id:       doctorUid,
-      receiver_id:     convo.id,   // ✅ patients.id = auth UUID du patient
+      sender_id:       myUid,
+      receiver_id:     convo.id,
       content,
     });
-
-    if (error) {
-      console.error('Erreur envoi message:', error);
-      setInputText(content); // remettre si erreur
-    }
-    // Le message revient via Realtime — pas de setState ici
+    if (error) { console.error('Erreur envoi:', error); setInputText(content); }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
-
-  const filteredConvos = convos.filter((c) =>
-    c.patientName.toLowerCase().includes(search.toLowerCase())
-  );
 
   const markAsRead = async (convo: Conversation) => {
     setConvos((prev) =>
       prev.map((c) => c.id === convo.id ? { ...c, unread: 0 } : c)
     );
-    const doctorUid = doctorUidRef.current;
-    if (!doctorUid) return;
+    const myUid = doctorUidRef.current;
+    if (!myUid) return;
     await supabase
       .from('messages')
       .update({ is_read: true })
       .eq('conversation_id', convo.conversationId)
-      .eq('receiver_id', doctorUid)
+      .eq('receiver_id', myUid)
       .eq('is_read', false);
   };
+
+  const filteredConvos = convos.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const totalUnread = convos.reduce((s, c) => s + c.unread, 0);
 
   // ── Loading ─────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div
-        className="flex h-full items-center justify-center"
-        style={{ backgroundColor: 'var(--cd-bg1)' }}
-      >
+      <div className="flex h-full items-center justify-center"
+        style={{ backgroundColor: 'var(--cd-bg1)' }}>
         <Loader2 className="w-6 h-6 animate-spin" style={{ color: 'var(--cd-t4)' }} />
       </div>
     );
@@ -336,160 +510,259 @@ export const MessagesPage: React.FC = () => {
   return (
     <div className="flex h-full" style={{ backgroundColor: 'var(--cd-bg1)' }}>
 
-      {/* ════════════════════════════════════════════
-          Liste des conversations
-      ════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════════
+          Sidebar
+      ══════════════════════════════════════════ */}
       <div
         className={`${selectedId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-72 lg:w-80 flex-shrink-0`}
         style={{ backgroundColor: 'var(--cd-bg2)', borderRight: '1px solid var(--cd-bd)' }}
       >
-        {/* Header liste */}
+        {/* Header */}
         <div className="p-4" style={{ borderBottom: '1px solid var(--cd-bd)' }}>
-          <h2 className="font-bold text-base mb-3" style={{ color: 'var(--cd-t1)' }}>
-            Messages
-            <span
-              className="ml-2 px-1.5 py-0.5 text-[10px] rounded-full"
-              style={{
-                background: 'rgba(14,165,233,0.12)',
-                color:      '#0EA5E9',
-                border:     '1px solid rgba(14,165,233,0.25)',
-              }}
-            >
-              {convos.length}
-            </span>
-          </h2>
-          <div
-            className="flex items-center gap-2 rounded-lg px-3 py-2"
-            style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}
-          >
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-bold text-base" style={{ color: 'var(--cd-t1)' }}>
+              Messages
+            </h2>
+            {totalUnread > 0 && (
+              <span className="px-2 py-0.5 text-[10px] rounded-full font-bold"
+                style={{ background: '#0EA5E9', color: '#fff' }}>
+                {totalUnread} non lu{totalUnread > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+
+          {/* Légende */}
+          <div className="flex items-center gap-4 mb-3">
+            <div className="flex items-center gap-1.5">
+              <div className="relative w-5 h-5">
+                <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7]" />
+                <span className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-amber-400 rounded-full flex items-center justify-center">
+                  <Star className="w-1.5 h-1.5 text-white fill-white" />
+                </span>
+              </div>
+              <span className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>
+                {lang === 'FR' ? 'Mes patients' : 'My patients'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-5 h-5 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7]" />
+              <span className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>
+                {lang === 'FR' ? 'Autres patients' : 'Other patients'}
+              </span>
+            </div>
+          </div>
+
+          {/* Recherche */}
+          <div className="flex items-center gap-2 rounded-lg px-3 py-2"
+            style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
             <Search className="w-3.5 h-3.5" style={{ color: 'var(--cd-t5)' }} />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={lang === 'FR' ? 'Rechercher...' : 'Search...'}
+              placeholder={lang === 'FR' ? 'Rechercher un patient...' : 'Search a patient...'}
               className="bg-transparent text-xs outline-none w-full"
               style={{ color: 'var(--cd-t3)' }}
             />
           </div>
         </div>
 
-        {/* Items */}
+        {/* Compteurs */}
+        <div className="px-4 py-2 flex items-center gap-2"
+          style={{ borderBottom: '1px solid var(--cd-bd)' }}>
+          <span className="text-[11px]" style={{ color: 'var(--cd-t5)' }}>
+            {convos.filter((c) => c.isMyPatient).length}
+            {' '}{lang === 'FR' ? 'patients attitrés' : 'assigned patients'}
+          </span>
+          <span style={{ color: 'var(--cd-bd)' }}>·</span>
+          <span className="text-[11px]" style={{ color: 'var(--cd-t5)' }}>
+            {convos.filter((c) => !c.isMyPatient).length}
+            {' '}{lang === 'FR' ? 'autres' : 'others'}
+          </span>
+        </div>
+
+        {/* Liste */}
         <div className="flex-1 overflow-y-auto">
           {filteredConvos.length === 0 ? (
-            <div className="flex items-center justify-center h-40">
+            <div className="flex flex-col items-center justify-center h-40 gap-2">
               <p className="text-xs" style={{ color: 'var(--cd-t5)' }}>
-                {lang === 'FR' ? 'Aucun patient trouvé' : 'No patients found'}
+                {lang === 'FR' ? 'Aucun patient trouvé' : 'No patient found'}
               </p>
             </div>
           ) : (
-            filteredConvos.map((convo) => (
-              <button
-                key={convo.id}
-                onClick={() => { setSelectedId(convo.id); markAsRead(convo); }}
-                className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
-                style={{
-                  backgroundColor: selectedId === convo.id ? 'var(--cd-bg3)' : 'transparent',
-                  borderBottom:    '1px solid var(--cd-bd2)',
-                  borderLeft:      selectedId === convo.id
-                    ? '2px solid #0EA5E9'
-                    : '2px solid transparent',
-                }}
-                onMouseEnter={(e) => {
-                  if (selectedId !== convo.id)
-                    e.currentTarget.style.backgroundColor = 'var(--cd-hv)';
-                }}
-                onMouseLeave={(e) => {
-                  if (selectedId !== convo.id)
-                    e.currentTarget.style.backgroundColor = 'transparent';
-                }}
-              >
-                {/* Avatar */}
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7] flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                  {convo.patientAvatar}
-                </div>
+            filteredConvos.map((convo, idx) => {
+              // Séparateur entre patients attitrés et autres
+              const prevConvo = filteredConvos[idx - 1];
+              const showSeparator =
+                idx > 0 &&
+                !convo.isMyPatient &&
+                prevConvo.isMyPatient;
 
-                {/* Infos */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span
-                      className="text-sm truncate"
-                      style={{
-                        color:      'var(--cd-t1)',
-                        fontWeight: convo.unread > 0 ? 700 : 500,
-                      }}
-                    >
-                      {convo.patientName}
-                    </span>
-                    <span
-                      className="text-[10px] flex-shrink-0 ml-1"
-                      style={{ color: 'var(--cd-t5)' }}
-                    >
-                      {convo.lastTime}
-                    </span>
-                  </div>
-                  <p
-                    className="text-xs truncate"
+              return (
+                <React.Fragment key={convo.id}>
+                  {showSeparator && (
+                    <div className="px-4 py-1.5 flex items-center gap-2"
+                      style={{ backgroundColor: 'var(--cd-bg1)' }}>
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--cd-bd)' }} />
+                      <span className="text-[10px] font-medium"
+                        style={{ color: 'var(--cd-t5)' }}>
+                        {lang === 'FR' ? 'Autres patients' : 'Other patients'}
+                      </span>
+                      <div className="flex-1 h-px" style={{ backgroundColor: 'var(--cd-bd)' }} />
+                    </div>
+                  )}
+
+                  <button
+                    onClick={() => { setSelectedId(convo.id); markAsRead(convo); }}
+                    className="w-full text-left px-4 py-3 flex items-start gap-3 transition-colors"
                     style={{
-                      color:      convo.unread > 0 ? 'var(--cd-t1)' : 'var(--cd-t4)',
-                      fontWeight: convo.unread > 0 ? 600 : 400,
+                      backgroundColor: selectedId === convo.id ? 'var(--cd-bg3)' : 'transparent',
+                      borderBottom:    '1px solid var(--cd-bd2)',
+                      borderLeft: selectedId === convo.id
+                        ? '2px solid #0EA5E9'
+                        : convo.isMyPatient
+                          ? '2px solid rgba(251,191,36,0.5)'
+                          : '2px solid transparent',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (selectedId !== convo.id)
+                        e.currentTarget.style.backgroundColor = 'var(--cd-hv)';
+                    }}
+                    onMouseLeave={(e) => {
+                      if (selectedId !== convo.id)
+                        e.currentTarget.style.backgroundColor = 'transparent';
                     }}
                   >
-                    {convo.lastMessage}
-                  </p>
-                </div>
+                    {/* Avatar */}
+                    <div className="relative flex-shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7] flex items-center justify-center text-white text-xs font-bold">
+                        {convo.avatar}
+                      </div>
+                      {/* Étoile patients attitrés */}
+                      {convo.isMyPatient && (
+                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 rounded-full flex items-center justify-center shadow-sm">
+                          <Star className="w-2.5 h-2.5 text-white fill-white" />
+                        </span>
+                      )}
+                      {/* Point en ligne */}
+                      <span
+                        className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full border-2"
+                        style={{
+                          backgroundColor: '#10B981',
+                          borderColor:     'var(--cd-bg2)',
+                        }}
+                      />
+                    </div>
 
-                {/* Badge non-lu */}
-                {convo.unread > 0 && (
-                  <span className="w-4 h-4 bg-[#0EA5E9] text-white text-[10px] rounded-full flex items-center justify-center font-bold flex-shrink-0">
-                    {convo.unread}
-                  </span>
-                )}
-              </button>
-            ))
+                    {/* Infos */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span
+                          className="text-sm truncate"
+                          style={{
+                            color:      'var(--cd-t1)',
+                            fontWeight: convo.unread > 0 ? 700 : 500,
+                          }}
+                        >
+                          {convo.name}
+                        </span>
+                        <span className="text-[10px] flex-shrink-0 ml-1"
+                          style={{ color: 'var(--cd-t5)' }}>
+                          {convo.lastTime}
+                        </span>
+                      </div>
+                      <p
+                        className="text-xs truncate"
+                        style={{
+                          color:      convo.unread > 0 ? 'var(--cd-t1)' : 'var(--cd-t4)',
+                          fontWeight: convo.unread > 0 ? 600 : 400,
+                        }}
+                      >
+                        {convo.lastMessage}
+                      </p>
+                    </div>
+
+                    {/* Badge non-lu */}
+                    {convo.unread > 0 && (
+                      <span className="w-4 h-4 bg-[#0EA5E9] text-white text-[10px] rounded-full flex items-center justify-center font-bold flex-shrink-0">
+                        {convo.unread}
+                      </span>
+                    )}
+                  </button>
+                </React.Fragment>
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* ════════════════════════════════════════════
+      {/* ══════════════════════════════════════════
           Zone de chat
-      ════════════════════════════════════════════ */}
+      ══════════════════════════════════════════ */}
       {selectedConvo ? (
         <div className={`${selectedId ? 'flex' : 'hidden md:flex'} flex-1 flex-col`}>
 
-          {/* Header chat */}
+          {/* Header */}
           <div
             className="flex items-center justify-between px-5 py-3.5"
             style={{ backgroundColor: 'var(--cd-bg2)', borderBottom: '1px solid var(--cd-bd)' }}
           >
             <div className="flex items-center gap-3">
-              <button
-                className="md:hidden mr-1"
-                style={{ color: 'var(--cd-t4)' }}
-                onClick={() => setSelectedId('')}
-              >←</button>
+              <button className="md:hidden mr-1" style={{ color: 'var(--cd-t4)' }}
+                onClick={() => setSelectedId('')}>←</button>
+
               <div className="relative">
                 <div className="w-9 h-9 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7] flex items-center justify-center text-white text-xs font-bold">
-                  {selectedConvo.patientAvatar}
+                  {selectedConvo.avatar}
                 </div>
+                {selectedConvo.isMyPatient && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 rounded-full flex items-center justify-center">
+                    <Star className="w-2.5 h-2.5 text-white fill-white" />
+                  </span>
+                )}
                 <span
                   className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-[#10B981] rounded-full border-2"
                   style={{ borderColor: 'var(--cd-bg2)' }}
                 />
               </div>
+
               <div>
-                <p className="text-sm font-semibold" style={{ color: 'var(--cd-t1)' }}>
-                  {selectedConvo.patientName}
-                </p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-semibold" style={{ color: 'var(--cd-t1)' }}>
+                    {selectedConvo.name}
+                  </p>
+                  {selectedConvo.isMyPatient ? (
+                    <span
+                      className="px-1.5 py-0.5 text-[9px] font-semibold rounded-full"
+                      style={{
+                        backgroundColor: 'rgba(251,191,36,0.15)',
+                        color:           '#F59E0B',
+                        border:          '1px solid rgba(251,191,36,0.3)',
+                      }}
+                    >
+                      {lang === 'FR' ? 'Mon patient' : 'My patient'}
+                    </span>
+                  ) : (
+                    <span
+                      className="px-1.5 py-0.5 text-[9px] font-semibold rounded-full"
+                      style={{
+                        backgroundColor: 'rgba(14,165,233,0.1)',
+                        color:           '#0EA5E9',
+                        border:          '1px solid rgba(14,165,233,0.25)',
+                      }}
+                    >
+                      {lang === 'FR' ? 'Patient' : 'Patient'}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[#10B981] text-xs">
                   {lang === 'FR' ? 'En ligne' : 'Online'}
                 </p>
               </div>
             </div>
+
             <div className="flex items-center gap-2">
               {[Phone, Video, MoreVertical].map((Icon, i) => (
-                <button
-                  key={i}
-                  className="p-2 rounded-lg transition-colors"
+                <button key={i} className="p-2 rounded-lg transition-colors"
                   style={{ color: 'var(--cd-t4)' }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.backgroundColor = 'var(--cd-hv)';
@@ -498,8 +771,7 @@ export const MessagesPage: React.FC = () => {
                   onMouseLeave={(e) => {
                     e.currentTarget.style.backgroundColor = 'transparent';
                     e.currentTarget.style.color           = 'var(--cd-t4)';
-                  }}
-                >
+                  }}>
                   <Icon className="w-4 h-4" />
                 </button>
               ))}
@@ -508,8 +780,6 @@ export const MessagesPage: React.FC = () => {
 
           {/* Messages */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-
-            {/* Séparateur date */}
             <div className="flex items-center gap-3 py-2">
               <div className="flex-1 h-px" style={{ backgroundColor: 'var(--cd-bd)' }} />
               <span className="text-xs px-2" style={{ color: 'var(--cd-t5)' }}>
@@ -518,82 +788,68 @@ export const MessagesPage: React.FC = () => {
               <div className="flex-1 h-px" style={{ backgroundColor: 'var(--cd-bd)' }} />
             </div>
 
-            {/* États */}
             {msgsLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--cd-t4)' }} />
               </div>
             ) : selectedConvo.messages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 gap-3">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center"
-                  style={{ backgroundColor: 'var(--cd-bg3)' }}
-                >
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center"
+                  style={{ backgroundColor: 'var(--cd-bg3)' }}>
                   <Send className="w-5 h-5" style={{ color: 'var(--cd-t5)' }} />
                 </div>
                 <p className="text-xs text-center" style={{ color: 'var(--cd-t5)' }}>
                   {lang === 'FR'
-                    ? `Démarrez votre conversation avec ${selectedConvo.patientName}`
-                    : `Start your conversation with ${selectedConvo.patientName}`}
+                    ? `Démarrez votre conversation avec ${selectedConvo.name}`
+                    : `Start your conversation with ${selectedConvo.name}`}
                 </p>
               </div>
             ) : (
               selectedConvo.messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.isFromDoctor ? 'justify-end' : 'justify-start'}`}
-                >
-                  {/* Avatar patient */}
-                  {!msg.isFromDoctor && (
+                <div key={msg.id}
+                  className={`flex ${msg.isFromMe ? 'justify-end' : 'justify-start'}`}>
+
+                  {!msg.isFromMe && (
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#0EA5E9] to-[#0284c7] flex items-center justify-center text-white text-[10px] font-bold mr-2 flex-shrink-0 self-end">
-                      {selectedConvo.patientAvatar.slice(0, 1)}
+                      {selectedConvo.avatar.slice(0, 1)}
                     </div>
                   )}
 
-                  {/* Bulle */}
                   <div
-                    className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${
-                      msg.isFromDoctor ? 'rounded-br-sm' : 'rounded-bl-sm'
-                    }`}
+                    className={`max-w-[70%] px-4 py-2.5 rounded-2xl ${msg.isFromMe ? 'rounded-br-sm' : 'rounded-bl-sm'}`}
                     style={{
-                      background: msg.isFromDoctor
+                      background: msg.isFromMe
                         ? 'linear-gradient(135deg, #0EA5E9, #0284c7)'
                         : 'var(--cd-hv)',
                     }}
                   >
                     <p
-                      className={`text-sm leading-relaxed ${msg.isFromDoctor ? 'text-white' : ''}`}
-                      style={!msg.isFromDoctor ? { color: 'var(--cd-t1)' } : undefined}
+                      className={`text-sm leading-relaxed ${msg.isFromMe ? 'text-white' : ''}`}
+                      style={!msg.isFromMe ? { color: 'var(--cd-t1)' } : undefined}
                     >
                       {msg.content}
                     </p>
                     <div className="flex items-center justify-end gap-1 mt-1">
-                      <span
-                        className="text-[10px]"
+                      <span className="text-[10px]"
                         style={
-                          msg.isFromDoctor
+                          msg.isFromMe
                             ? { color: 'rgba(191,219,254,0.7)' }
                             : { color: 'var(--cd-t4)' }
-                        }
-                      >
+                        }>
                         {msg.timestamp}
                       </span>
-                      {/* Indicateur lu/non-lu */}
-                      {msg.isFromDoctor && (
-                        <CheckCheck
-                          className="w-3 h-3"
+                      {msg.isFromMe && (
+                        <CheckCheck className="w-3 h-3"
                           style={{
                             color: msg.isRead
                               ? 'rgba(191,219,254,1)'
                               : 'rgba(191,219,254,0.35)',
-                          }}
-                        />
+                          }} />
                       )}
                     </div>
                   </div>
 
-                  {/* Avatar docteur */}
-                  {msg.isFromDoctor && (
+                  {msg.isFromMe && (
                     <div className="w-7 h-7 rounded-full bg-gradient-to-br from-[#10B981] to-[#059669] flex items-center justify-center text-white text-[10px] font-bold ml-2 flex-shrink-0 self-end">
                       Dr
                     </div>
@@ -605,23 +861,15 @@ export const MessagesPage: React.FC = () => {
           </div>
 
           {/* Input */}
-          <div
-            className="px-4 py-3"
-            style={{ backgroundColor: 'var(--cd-bg2)', borderTop: '1px solid var(--cd-bd)' }}
-          >
-            <div
-              className="flex items-center gap-2 rounded-xl px-3 py-2"
-              style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}
-            >
-              <button
-                className="p-1 transition-colors"
-                style={{ color: 'var(--cd-t4)' }}
+          <div className="px-4 py-3"
+            style={{ backgroundColor: 'var(--cd-bg2)', borderTop: '1px solid var(--cd-bd)' }}>
+            <div className="flex items-center gap-2 rounded-xl px-3 py-2"
+              style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
+              <button className="p-1 transition-colors" style={{ color: 'var(--cd-t4)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}
-              >
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}>
                 <Paperclip className="w-4 h-4" />
               </button>
-
               <input
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
@@ -630,16 +878,11 @@ export const MessagesPage: React.FC = () => {
                 className="flex-1 bg-transparent text-sm outline-none"
                 style={{ color: 'var(--cd-t1)' }}
               />
-
-              <button
-                className="p-1 transition-colors"
-                style={{ color: 'var(--cd-t4)' }}
+              <button className="p-1 transition-colors" style={{ color: 'var(--cd-t4)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}
-              >
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}>
                 <Smile className="w-4 h-4" />
               </button>
-
               <button
                 onClick={sendMessage}
                 disabled={!inputText.trim()}
@@ -653,7 +896,6 @@ export const MessagesPage: React.FC = () => {
                 <Send className="w-3.5 h-3.5 text-white" />
               </button>
             </div>
-
             <p className="text-[10px] text-center mt-1.5" style={{ color: 'var(--cd-t5)' }}>
               {lang === 'FR'
                 ? 'Entrée pour envoyer · Shift+Entrée pour nouvelle ligne'
@@ -662,16 +904,11 @@ export const MessagesPage: React.FC = () => {
           </div>
         </div>
       ) : (
-        /* Aucune conversation sélectionnée */
-        <div
-          className="hidden md:flex flex-1 items-center justify-center"
-          style={{ color: 'var(--cd-t4)' }}
-        >
+        <div className="hidden md:flex flex-1 items-center justify-center"
+          style={{ color: 'var(--cd-t4)' }}>
           <div className="text-center">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
-              style={{ backgroundColor: 'var(--cd-bg3)' }}
-            >
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-4"
+              style={{ backgroundColor: 'var(--cd-bg3)' }}>
               <Send className="w-7 h-7" style={{ color: 'var(--cd-t5)' }} />
             </div>
             <p>
