@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
@@ -15,8 +19,24 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vite/client"]
+    "typeRoots": [
+      "./node_modules/@types",
+      "C:/Users/eyaes/node_modules/@types",
+      "C:/Users/eyaes/node_modules/.pnpm/@types+react@18.3.29/node_modules/@types",
+      "C:/Users/eyaes/node_modules/.pnpm/@types+react-dom@18.3.7_@types+react@18.3.29/node_modules/@types"
+    ],
+    "paths": {
+      "react": ["C:/Users/eyaes/node_modules/.pnpm/@types+react@18.3.29/node_modules/@types/react/index.d.ts"],
+      "react/jsx-runtime": ["C:/Users/eyaes/node_modules/.pnpm/@types+react@18.3.29/node_modules/@types/react/jsx-runtime.d.ts"],
+      "react-dom": ["C:/Users/eyaes/node_modules/.pnpm/@types+react-dom@18.3.7_@types+react@18.3.29/node_modules/@types/react-dom/index.d.ts"]
+    }
   },
-  "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "./tsconfig.node.json"
+    }
+  ]
 }
