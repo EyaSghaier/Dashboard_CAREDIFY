@@ -598,49 +598,151 @@ node["emergency"="defibrillator"](around:${radius},${lat},${lng});
         {/* ── POIs badge supprimé ── */}
       </div>
 
-      {/* ── CRITICAL / AT RISK WATCHLIST STRIP ── */}
+      {/* ── Patient watchlist strip ── */}
       <div className="px-3 py-2" style={{ background: 'var(--cd-bg2)', borderTop: '1px solid var(--cd-bd)', flexShrink: 0 }}>
         <div
-          className="rounded-xl p-3 shadow-2xl overflow-x-auto"
-          style={{ background: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)', backdropFilter: 'blur(12px)' }}
+          className="overflow-x-auto overflow-y-hidden patient-hscroll"
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            paddingLeft: '12px',
+            paddingRight: '12px',
+            paddingTop: '10px',
+            paddingBottom: '10px',
+            gap: '10px',
+            scrollbarWidth: 'none',      /* Firefox */
+            msOverflowStyle: 'none',     /* IE/Edge */
+          }}
         >
-          <div className="flex items-center gap-3 min-w-max">
-            {patients
-              .filter((p) => p.riskClass === 'Critical' || p.riskClass === 'At Risk')
-              .map((p) => {
-                const color = getRiskColor(p.riskClass, p.isOnline);
-                return (
-                  <button
-                    key={p.id}
-                    onClick={() => navigate(`/patients/${p.id}`)}
-                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all hover:scale-105"
-                    style={{
-                      background: `${color}10`,
-                      borderColor: `${color}30`,
-                    }}
-                  >
-                    <div
-                      className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[9px] font-bold flex-shrink-0"
-                      style={{ backgroundColor: color }}
-                    >
+          <style>{`.patient-hscroll::-webkit-scrollbar{display:none;}`}</style>
+
+          {loading && patients.length === 0 ? (
+            <div className="flex items-center justify-center w-full py-4 gap-2" style={{ color:'var(--cd-t4)' }}>
+              <Loader2 className="w-4 h-4 animate-spin"/>
+              <span className="text-sm">{lang==='EN'?'Loading patients…':'Chargement…'}</span>
+            </div>
+          ) : patients.length === 0 ? (
+            <div className="flex items-center justify-center w-full py-4" style={{ color:'var(--cd-t4)' }}>
+              <span className="text-sm">{lang==='EN'?'No patients assigned':'Aucun patient assigné'}</span>
+            </div>
+          ) : (
+            patients.map((p) => {
+              const color    = getRiskColor(p.riskClass, p.isOnline);
+              const isActive = p.id === activeId;
+              const riskLabel = p.riskClass==='Critical' ? (lang==='EN'?'Critical':'Critique')
+                : p.riskClass==='At Risk' ? (lang==='EN'?'At Risk':'À risque') : 'Normal';
+
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => flyToPatient(p)}
+                  style={{
+                    flexShrink: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '10px 14px',
+                    borderRadius: '14px',
+                    background: isActive ? `${color}18` : 'var(--cd-bg3)',
+                    border: `1.5px solid ${isActive ? color : 'var(--cd-bd)'}`,
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    minWidth: '90px',
+                    maxWidth: '110px',
+                    textAlign: 'center',
+                  }}
+                >
+                  {/* Avatar + badge GPS */}
+                  <div style={{ position: 'relative', flexShrink: 0 }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      borderRadius: '50%',
+                      background: color,
+                      boxShadow: `0 0 8px ${color}60`,
+                      opacity: p.isOnline ? 1 : 0.7,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontWeight: 'bold',
+                      fontSize: '13px',
+                      color: 'white',
+                    }}>
                       {p.avatar}
                     </div>
-                    <div className="text-left">
-                      <p className="text-xs font-medium whitespace-nowrap" style={{ color: 'var(--cd-t1)' }}>{p.name}</p>
-                      <p className="text-xs font-bold" style={{ color }}>{p.aiScore}/100</p>
+                    {/* Badge statut GPS */}
+                    <div style={{
+                      position: 'absolute',
+                      bottom: '-2px',
+                      right: '-2px',
+                      width: '14px',
+                      height: '14px',
+                      borderRadius: '50%',
+                      border: '2px solid var(--cd-bg2)',
+                      background: p.isOnline && p.isRealGPS ? '#10B981'
+                               : !p.isOnline ? '#6B7280' : '#F59E0B',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}>
+                      {p.isOnline && p.isRealGPS
+                        ? <Wifi style={{ width: '8px', height: '8px', color: 'white' }}/>
+                        : !p.isOnline
+                        ? <WifiOff style={{ width: '8px', height: '8px', color: 'white' }}/>
+                        : <span style={{ color: 'white', fontWeight: 'bold', fontSize: '8px' }}>~</span>
+                      }
                     </div>
-                    {p.riskClass === 'Critical' && (
-                      <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: color }} />
-                    )}
-                  </button>
-                );
-              })}
-            {patients.filter((p) => p.riskClass === 'Critical' || p.riskClass === 'At Risk').length === 0 && (
-              <span className="text-xs px-2" style={{ color: 'var(--cd-t5)' }}>
-                {lang === 'EN' ? 'No critical or at-risk patients' : 'Aucun patient critique ou à risque'}
-              </span>
-            )}
-          </div>
+                  </div>
+
+                  {/* Nom */}
+                  <span style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    color: 'var(--cd-t1)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    maxWidth: '82px',
+                    display: 'block',
+                  }}>
+                    {p.name}
+                  </span>
+
+                  {/* Score */}
+                  <span style={{ fontSize: '12px', fontWeight: 'bold', color }}>
+                    {p.aiScore}
+                    <span style={{ fontSize: '10px', fontWeight: 'normal', color: 'var(--cd-t5)' }}>/100</span>
+                  </span>
+
+                  {/* Badge risque */}
+                  <span style={{
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    padding: '2px 7px',
+                    borderRadius: '20px',
+                    background: `${color}18`,
+                    color,
+                    border: `1px solid ${color}30`,
+                  }}>
+                    {riskLabel}
+                  </span>
+
+                  {/* Pulse dot for critical */}
+                  {p.riskClass === 'Critical' && p.isOnline && (
+                    <span style={{
+                      width: '6px',
+                      height: '6px',
+                      borderRadius: '50%',
+                      background: color,
+                      display: 'inline-block',
+                      animation: 'pulse 1s infinite',
+                    }}/>
+                  )}
+                </button>
+              );
+            })
+          )}
         </div>
       </div>
     </div>
