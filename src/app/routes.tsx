@@ -19,6 +19,22 @@ import { SuspendedPage } from './pages/SuspendedPage';
 import { RejectedPage } from './pages/RejectedPage';
 import { UsersPage } from './pages/UsersPage';
 
+// Timeout helper — évite de rester bloqué si Supabase ne répond pas
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error('timeout')), ms)
+    ),
+  ]);
+}
+
+const LoadingScreen = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: '#f0f4f8' }}>
+    <p style={{ color: '#1565C0', fontSize: '18px', fontFamily: 'Inter, sans-serif' }}>Chargement...</p>
+  </div>
+);
+
 // Guard: routes protégées pour les médecins actifs
 const DoctorProtectedLayout: React.FC = () => {
   const [checked, setChecked] = useState(false);
@@ -29,83 +45,55 @@ const DoctorProtectedLayout: React.FC = () => {
 
     const check = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        // Timeout 5s — si Supabase ne répond pas, redirige vers login
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          5000
+        );
 
         if (!session) {
-          if (isMounted) {
-            setRedirect('/login');
-            setChecked(true);
-          }
+          if (isMounted) { setRedirect('/login'); setChecked(true); }
           return;
         }
 
-        // Charger role + status
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role, status')
-          .eq('id', session.user.id)
-          .maybeSingle();
+        const { data: profile } = await withTimeout(
+          supabase.from('profiles').select('role, status').eq('id', session.user.id).maybeSingle(),
+          5000
+        );
 
         if (!profile) {
           if (session.user.email?.toLowerCase() === 'admin@caredify.tn') {
-            if (isMounted) {
-              setRedirect('/admin/users');
-              setChecked(true);
-            }
+            if (isMounted) { setRedirect('/admin/users'); setChecked(true); }
             return;
           }
-
-          if (isMounted) {
-            setRedirect('/login');
-            setChecked(true);
-          }
+          if (isMounted) { setRedirect('/login'); setChecked(true); }
           return;
         }
 
         const { role, status } = profile;
 
-        // Admin → dashboard admin (par rôle OU par email)
         if (role === 'admin' || session.user.email?.toLowerCase() === 'admin@caredify.tn') {
-          if (isMounted) {
-            setRedirect('/admin/users');
-            setChecked(true);
-          }
+          if (isMounted) { setRedirect('/admin/users'); setChecked(true); }
           return;
         }
 
-        // Doctor — vérifier statut
         if (isDoctor(role)) {
           if (status === 'active') {
             if (isMounted) setChecked(true);
           } else if (status === 'suspended') {
-            if (isMounted) {
-              setRedirect('/suspended');
-              setChecked(true);
-            }
+            if (isMounted) { setRedirect('/suspended'); setChecked(true); }
           } else if (status === 'rejected') {
-            if (isMounted) {
-              setRedirect('/rejected');
-              setChecked(true);
-            }
+            if (isMounted) { setRedirect('/rejected'); setChecked(true); }
           } else {
-            if (isMounted) {
-              setRedirect('/pending-approval');
-              setChecked(true);
-            }
+            if (isMounted) { setRedirect('/pending-approval'); setChecked(true); }
           }
           return;
         }
 
-        // Rôle inconnu
-        if (isMounted) {
-          setRedirect('/login');
-          setChecked(true);
-        }
+        if (isMounted) { setRedirect('/login'); setChecked(true); }
       } catch {
-        if (isMounted) {
-          setRedirect('/login');
-          setChecked(true);
-        }
+        // Timeout ou erreur réseau → redirige vers login
+        if (isMounted) { setRedirect('/login'); setChecked(true); }
       }
     };
 
@@ -121,22 +109,19 @@ const DoctorProtectedLayout: React.FC = () => {
     };
   }, []);
 
-  if (!checked) return null;
+  if (!checked) return <LoadingScreen />;
   if (redirect) return <Navigate to={redirect} replace />;
   return <Layout />;
 };
 
-// Guard: route /pending-approval (médecin connecté mais pas encore actif)
+// Guard: route /pending-approval
 const PendingGuard: React.FC = () => {
   const { user, profile, loading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (loading) return;
-    if (!user) {
-      navigate('/login', { replace: true });
-      return;
-    }
+    if (!user) { navigate('/login', { replace: true }); return; }
 
     if (profile?.role === 'admin' || user.email?.toLowerCase() === 'admin@caredify.tn') {
       navigate('/admin/users', { replace: true });
@@ -148,23 +133,20 @@ const PendingGuard: React.FC = () => {
     if (profile?.status === 'rejected') navigate('/rejected', { replace: true });
   }, [user, profile, loading, navigate]);
 
-  if (loading) return null;
+  if (loading) return <LoadingScreen />;
   return <PendingApprovalPage />;
 };
 
 // Router
 export const router = createBrowserRouter([
-  // Authentification (publiques)
   { path: '/login', Component: LoginPage },
   { path: '/signup', Component: SignUpPage },
   { path: '/forgot-password', Component: ForgotPasswordPage },
 
-  // Pages de statut (accessibles après login, selon statut)
   { path: '/pending-approval', Component: PendingGuard },
   { path: '/suspended', Component: SuspendedPage },
   { path: '/rejected', Component: RejectedPage },
 
-  // Dashboard médecin (protégé : connecté + status=active)
   {
     path: '/',
     Component: DoctorProtectedLayout,
@@ -181,7 +163,6 @@ export const router = createBrowserRouter([
     ],
   },
 
-  // Dashboard admin (protégé : role=admin — guard dans AdminShell)
   {
     path: '/admin',
     Component: AdminShell,
@@ -191,6 +172,5 @@ export const router = createBrowserRouter([
     ],
   },
 
-  // Fallback
   { path: '*', element: <Navigate to="/login" replace /> },
 ]);
