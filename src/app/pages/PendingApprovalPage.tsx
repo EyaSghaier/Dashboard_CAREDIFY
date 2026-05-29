@@ -1,12 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Clock, Mail, LogOut, CheckCircle, Sun, Moon, Loader2, ArrowRight } from 'lucide-react';
+import { Clock, Mail, LogOut, CheckCircle, Sun, Moon, Loader2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useLang } from '../context/LanguageContext';
 import { CaredifyLogoIcon } from '../components/CaredifyLogo';
-import { supabase } from '../../lib/supabase';
-import type { UserStatus } from '../../lib/supabase';
 
 const i18n = {
   FR: {
@@ -17,15 +15,12 @@ const i18n = {
     step1: 'Inscription soumise',
     step1Sub: 'Vos informations ont été enregistrées',
     step2: 'Vérification en cours',
-    step2Sub: "Contrôle de votre n° Ordre des Médecins et de l'établissement",
+    step2Sub: "Contrôle de votre n° RPPS et de l'établissement",
     step3: 'Activation du compte',
-    step3Sub: 'Accès accordé par l\'administrateur',
+    step3Sub: 'Vous recevrez un email de confirmation',
     emailNote: 'Un email de confirmation vous sera envoyé à',
     logout: 'Se déconnecter',
-    btnPending: 'En attente d\'approbation…',
-    btnActive: 'Accéder au tableau de bord',
-    statusPending: 'Votre compte est toujours en cours de vérification.',
-    statusActive: 'Votre compte a été approuvé ! Redirection…',
+    check: 'Vérifier le statut',
     terms: "Conditions d'utilisation", privacy: 'Confidentialité', security: 'Sécurité HDS',
   },
   EN: {
@@ -38,30 +33,24 @@ const i18n = {
     step2: 'Verification in progress',
     step2Sub: 'Checking your license number and institution',
     step3: 'Account activation',
-    step3Sub: 'Access granted by administrator',
+    step3Sub: 'You will receive a confirmation email',
     emailNote: 'A confirmation email will be sent to',
     logout: 'Sign out',
-    btnPending: 'Waiting for approval…',
-    btnActive: 'Go to dashboard',
-    statusPending: 'Your account is still under review.',
-    statusActive: 'Your account has been approved! Redirecting…',
+    check: 'Check status',
     terms: 'Terms of Use', privacy: 'Privacy', security: 'HDS Security',
   },
 };
 
 export const PendingApprovalPage: React.FC = () => {
-  const { user, logout, profile } = useAuth();
+  const { user, logout, refreshProfile } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { lang, setLang } = useLang();
   const navigate = useNavigate();
   const t = i18n[lang];
   const isDark = theme === 'dark';
 
-  // Statut local : initialisé depuis le profil AuthContext
-  const [status, setStatus] = useState<UserStatus | null>(
-    (profile?.status as UserStatus) ?? null,
-  );
-  const [statusMsg, setStatusMsg] = useState<string | null>(null);
+  const [isChecking, setIsChecking] = useState(false);
+  const [checkMsg, setCheckMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   const accent = isDark ? '#0EA5E9' : '#1565C0';
   const pageBg = isDark
@@ -74,66 +63,47 @@ export const PendingApprovalPage: React.FC = () => {
   const subtitleColor = isDark ? '#6B7280' : '#6B7280';
   const gridColor = isDark ? 'rgba(18,34,70,0.08)' : 'rgba(21,101,192,0.055)';
 
-  // ─── Supabase Realtime : écoute les changements de status ────────────────
-  useEffect(() => {
-    if (!user?.id) return;
-
-    const channel = supabase
-      .channel(`profile-status-${user.id}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${user.id}`,
-        },
-        (payload) => {
-          const newStatus = payload.new.status as UserStatus;
-          console.log('🔔 [REALTIME] Status change received:', newStatus);
-          setStatus(newStatus);
-
-          if (newStatus === 'active') {
-            setStatusMsg(t.statusActive);
-            setTimeout(() => navigate('/dashboard', { replace: true }), 1500);
-          } else if (newStatus === 'suspended') {
-            navigate('/suspended', { replace: true });
-          } else if (newStatus === 'rejected') {
-            navigate('/rejected', { replace: true });
-          }
-        },
-      )
-      .subscribe((subStatus) => {
-        console.log('🔗 [REALTIME] Subscription status:', subStatus);
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.id, navigate, t.statusActive]);
-
-  // ─── Sync statut initial depuis profil AuthContext ────────────────────────
-  useEffect(() => {
-    if (profile?.status) {
-      setStatus(profile.status as UserStatus);
-    }
-  }, [profile?.status]);
-
   const handleLogout = async () => {
     await logout();
     navigate('/login');
   };
 
-  const handleGoToDashboard = () => {
-    if (status === 'active') navigate('/dashboard', { replace: true });
-  };
+  const handleCheckStatus = async () => {
+    setIsChecking(true);
+    setCheckMsg(null);
+    await refreshProfile();
 
-  const isActive = status === 'active';
+    // Read updated status directly from localStorage to avoid stale closure
+    try {
+      const raw = localStorage.getItem('caredify_session');
+      const updated = raw ? JSON.parse(raw) : null;
+      if (updated?.status === 'active') {
+        navigate('/approved');
+        return;
+      }
+      if (updated?.status === 'suspended') {
+        navigate('/suspended');
+        return;
+      }
+      if (updated?.status === 'rejected') {
+        navigate('/rejected');
+        return;
+      }
+    } catch { /* ignore */ }
+
+    setCheckMsg({
+      ok: false,
+      text: lang === 'FR'
+        ? 'Votre compte est toujours en cours de vérification.'
+        : 'Your account is still under review.',
+    });
+    setIsChecking(false);
+  };
 
   const steps = [
     { label: t.step1, sub: t.step1Sub, done: true },
-    { label: t.step2, sub: t.step2Sub, done: isActive, active: !isActive },
-    { label: t.step3, sub: t.step3Sub, done: isActive, active: isActive },
+    { label: t.step2, sub: t.step2Sub, done: false, active: true },
+    { label: t.step3, sub: t.step3Sub, done: false },
   ];
 
   return (
@@ -175,15 +145,9 @@ export const PendingApprovalPage: React.FC = () => {
           <div className="px-8 py-8">
             {/* Icon */}
             <div className="flex justify-center mb-5">
-              <div className="w-16 h-16 rounded-2xl flex items-center justify-center transition-all duration-500"
-                style={{
-                  background: isActive ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.1)',
-                  border: isActive ? '1px solid rgba(16,185,129,0.3)' : '1px solid rgba(245,158,11,0.3)',
-                }}>
-                {isActive
-                  ? <CheckCircle className="w-8 h-8 text-[#10B981]" />
-                  : <Clock className="w-8 h-8 text-[#F59E0B]" />
-                }
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: 'rgba(245,158,11,0.1)', border: '1px solid rgba(245,158,11,0.3)' }}>
+                <Clock className="w-8 h-8 text-[#F59E0B]" />
               </div>
             </div>
 
@@ -195,11 +159,8 @@ export const PendingApprovalPage: React.FC = () => {
             {/* Progress steps */}
             <div className="space-y-3 mb-6">
               {steps.map((step, i) => (
-                <div key={i} className="flex items-start gap-3 p-3 rounded-xl transition-all duration-300"
-                  style={{
-                    background: step.active ? (isDark ? 'rgba(14,165,233,0.06)' : 'rgba(21,101,192,0.05)') : 'transparent',
-                    border: step.active ? `1px solid ${isDark ? 'rgba(14,165,233,0.15)' : 'rgba(21,101,192,0.15)'}` : '1px solid transparent',
-                  }}>
+                <div key={i} className="flex items-start gap-3 p-3 rounded-xl"
+                  style={{ background: step.active ? (isDark ? 'rgba(14,165,233,0.06)' : 'rgba(21,101,192,0.05)') : 'transparent', border: step.active ? `1px solid ${isDark ? 'rgba(14,165,233,0.15)' : 'rgba(21,101,192,0.15)'}` : '1px solid transparent' }}>
                   <div className="flex-shrink-0 mt-0.5">
                     {step.done ? (
                       <CheckCircle className="w-5 h-5 text-[#10B981]" />
@@ -231,32 +192,26 @@ export const PendingApprovalPage: React.FC = () => {
               </div>
             )}
 
-            {/* Status message (Realtime feedback) */}
-            {statusMsg && (
-              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl mb-3 text-xs font-medium"
-                style={{ background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.3)', color: '#10B981' }}>
-                <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                {statusMsg}
+            {/* Check status */}
+            {checkMsg && (
+              <div className="flex items-center gap-2 px-4 py-2.5 rounded-xl mb-2 text-xs font-medium"
+                style={{
+                  background: checkMsg.ok ? 'rgba(16,185,129,0.1)' : 'rgba(245,158,11,0.08)',
+                  border: `1px solid ${checkMsg.ok ? 'rgba(16,185,129,0.3)' : 'rgba(245,158,11,0.25)'}`,
+                  color: checkMsg.ok ? '#10B981' : '#F59E0B',
+                }}>
+                {checkMsg.ok ? <CheckCircle className="w-3.5 h-3.5 flex-shrink-0" /> : <Clock className="w-3.5 h-3.5 flex-shrink-0" />}
+                {checkMsg.text}
               </div>
             )}
-
-            {/* ─── Bouton principal : gris (pending) ou bleu cliquable (active) ── */}
             <button
-              onClick={handleGoToDashboard}
-              disabled={!isActive}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold transition-all duration-500 mb-2"
-              style={{
-                background: isActive ? accent : (isDark ? 'rgba(255,255,255,0.06)' : 'rgba(21,101,192,0.08)'),
-                color: isActive ? '#ffffff' : (isDark ? '#4B5563' : '#9CA3AF'),
-                boxShadow: isActive ? (isDark ? '0 4px 20px rgba(14,165,233,0.35)' : '0 4px 20px rgba(21,101,192,0.3)') : 'none',
-                cursor: isActive ? 'pointer' : 'not-allowed',
-                border: isActive ? 'none' : `1px solid ${isDark ? 'rgba(255,255,255,0.08)' : 'rgba(21,101,192,0.15)'}`,
-              }}
-            >
-              {isActive
-                ? <><ArrowRight className="w-4 h-4" />{t.btnActive}</>
-                : <><Loader2 className="w-4 h-4 animate-spin opacity-50" />{t.btnPending}</>
-              }
+              onClick={handleCheckStatus}
+              disabled={isChecking}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold text-white transition-all mb-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              style={{ background: accent, boxShadow: isDark ? '0 4px 20px rgba(14,165,233,0.3)' : '0 4px 20px rgba(21,101,192,0.3)' }}>
+              {isChecking
+                ? <><Loader2 className="w-4 h-4 animate-spin" />{lang === 'FR' ? 'Vérification…' : 'Checking…'}</>
+                : t.check}
             </button>
 
             {/* Logout */}

@@ -403,7 +403,7 @@ export const UsersPage: React.FC = () => {
             </div>
             <h1 className="text-xl font-bold" style={{ color: 'var(--cd-t1)' }}>{t.title}</h1>
           </div>
-          <p className="text-sm ml-10" style={{ color: 'var(--cd-t4)' }}>{t.subtitle}</p>
+          <p className="text-sm sm:ml-10" style={{ color: 'var(--cd-t4)' }}>{t.subtitle}</p>
         </div>
 
         <div className="flex items-center gap-2">
@@ -469,15 +469,71 @@ export const UsersPage: React.FC = () => {
         />
       </div>
 
-      {/* Table */}
-      <div className="rounded-xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${border}` }}>
-        {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3">
-            <RefreshCw className="w-6 h-6 animate-spin" style={{ color: 'var(--cd-t4)' }} />
-            <p className="text-sm" style={{ color: 'var(--cd-t4)' }}>{t.loading}</p>
+      {/* Loading state */}
+      {loading ? (
+        <div className="rounded-xl flex flex-col items-center justify-center py-16 gap-3" style={{ background: cardBg, border: `1px solid ${border}` }}>
+          <RefreshCw className="w-6 h-6 animate-spin" style={{ color: 'var(--cd-t4)' }} />
+          <p className="text-sm" style={{ color: 'var(--cd-t4)' }}>{t.loading}</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl flex flex-col items-center justify-center py-16 gap-3" style={{ background: cardBg, border: `1px solid ${border}` }}>
+          <p className="text-sm" style={{ color: 'var(--cd-t4)' }}>{t.noResults}</p>
+        </div>
+      ) : (
+        <>
+          {/* ── Mobile Card View (< lg) ── */}
+          <div className="lg:hidden space-y-3">
+            {filtered.map((doctor) => (
+              <div key={doctor.id} className="rounded-xl p-4" style={{ background: cardBg, border: `1px solid ${border}` }}>
+                {/* Card header: avatar + name + status */}
+                <div className="flex items-start gap-3 mb-3">
+                  <div className={`w-10 h-10 rounded-full bg-gradient-to-br ${avatarColor(doctor.id)} flex items-center justify-center flex-shrink-0`}>
+                    <span className="text-white text-xs font-bold">{initials(doctor.full_name)}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold truncate" style={{ color: 'var(--cd-t1)' }}>{doctor.full_name || '—'}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--cd-t4)' }}>{doctor.email || '—'}</p>
+                  </div>
+                  <StatusBadge status={doctor.status} />
+                </div>
+
+                {/* Card details */}
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--cd-t3)' }}>
+                    <Stethoscope className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
+                    <span className="truncate">{doctor.specialty || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--cd-t3)' }}>
+                    <Building2 className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
+                    <span className="truncate capitalize">{doctor.hospital_clinic || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--cd-t3)' }}>
+                    <Phone className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
+                    <span className="truncate">{doctor.phone || '—'}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--cd-t3)' }}>
+                    <Calendar className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
+                    <span className="truncate">{formatDate(doctor.created_at)}</span>
+                  </div>
+                </div>
+
+                {/* Card actions */}
+                <div className="flex items-center justify-end pt-2" style={{ borderTop: `1px solid ${border}` }}>
+                  <ActionButtons doctor={doctor} />
+                </div>
+              </div>
+            ))}
+
+            {/* Mobile footer count */}
+            <div className="text-center py-2">
+              <p className="text-xs" style={{ color: 'var(--cd-t5)' }}>
+                {filtered.length} / {doctors.length} {t.total}
+              </p>
+            </div>
           </div>
-        ) : (
-          <>
+
+          {/* ── Desktop Table View (>= lg) ── */}
+          <div className="hidden lg:block rounded-xl overflow-hidden" style={{ background: cardBg, border: `1px solid ${border}` }}>
             <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
@@ -489,11 +545,7 @@ export const UsersPage: React.FC = () => {
                       { key: 'hospital_clinic' as SortKey, label: t.hospital,  icon: Building2 },
                       { key: 'created_at' as SortKey,      label: t.since,     icon: Calendar },
                     ].map(({ key, label, icon: Icon }) => (
-                      <th
-                        key={key}
-                        onClick={() => handleSort(key)}
-                        className="px-4 py-3 text-left cursor-pointer select-none"
-                      >
+                      <th key={key} onClick={() => handleSort(key)} className="px-4 py-3 text-left cursor-pointer select-none">
                         <div className="flex items-center gap-1.5">
                           {Icon && <Icon className="w-3.5 h-3.5" style={{ color: 'var(--cd-t4)' }} />}
                           <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--cd-t4)' }}>{label}</span>
@@ -510,93 +562,72 @@ export const UsersPage: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="text-center py-12 text-sm" style={{ color: 'var(--cd-t4)' }}>
-                        {t.noResults}
+                  {filtered.map((doctor, idx) => (
+                    <tr
+                      key={doctor.id}
+                      style={{
+                        borderBottom: idx < filtered.length - 1 ? `1px solid ${border}` : 'none',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = rowHover; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${avatarColor(doctor.id)} flex items-center justify-center flex-shrink-0`}>
+                            <span className="text-white text-xs font-bold">{initials(doctor.full_name)}</span>
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium" style={{ color: 'var(--cd-t1)' }}>{doctor.full_name || '—'}</p>
+                            <p className="text-[11px]" style={{ color: 'var(--cd-t5)' }}>
+                              <Phone className="w-2.5 h-2.5 inline mr-1" />{doctor.phone || '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-sm" style={{ color: 'var(--cd-t3)' }}>{doctor.email || '—'}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        {doctor.specialty ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                            style={{ background: 'rgba(14,165,233,0.1)', border: '1px solid rgba(14,165,233,0.2)', color: '#0EA5E9' }}>
+                            {doctor.specialty}
+                          </span>
+                        ) : (
+                          <span style={{ color: 'var(--cd-t5)' }}>—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
+                          <span className="text-sm capitalize" style={{ color: 'var(--cd-t3)' }}>{doctor.hospital_clinic || '—'}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>{formatDate(doctor.created_at)}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge status={doctor.status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        <ActionButtons doctor={doctor} />
                       </td>
                     </tr>
-                  ) : (
-                    filtered.map((doctor, idx) => (
-                      <tr
-                        key={doctor.id}
-                        style={{
-                          borderBottom: idx < filtered.length - 1 ? `1px solid ${border}` : 'none',
-                          transition: 'background 0.15s',
-                        }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = rowHover; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLTableRowElement).style.background = 'transparent'; }}
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-9 h-9 rounded-full bg-gradient-to-br ${avatarColor(doctor.id)} flex items-center justify-center flex-shrink-0`}>
-                              <span className="text-white text-xs font-bold">{initials(doctor.full_name)}</span>
-                            </div>
-                            <div>
-                              <p className="text-sm font-medium" style={{ color: 'var(--cd-t1)' }}>
-                                {doctor.full_name || '—'}
-                              </p>
-                              <p className="text-[11px]" style={{ color: 'var(--cd-t5)' }}>
-                                <Phone className="w-2.5 h-2.5 inline mr-1" />
-                                {doctor.phone || '—'}
-                              </p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-sm" style={{ color: 'var(--cd-t3)' }}>{doctor.email || '—'}</span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {doctor.specialty ? (
-                            <span
-                              className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
-                              style={{ background: 'rgba(14,165,233,0.1)', border: '1px solid rgba(14,165,233,0.2)', color: '#0EA5E9' }}
-                            >
-                              {doctor.specialty}
-                            </span>
-                          ) : (
-                            <span style={{ color: 'var(--cd-t5)' }}>—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-1.5">
-                            <Building2 className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--cd-t5)' }} />
-                            <span className="text-sm capitalize" style={{ color: 'var(--cd-t3)' }}>
-                              {doctor.hospital_clinic || '—'}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>
-                            {formatDate(doctor.created_at)}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <StatusBadge status={doctor.status} />
-                        </td>
-                        <td className="px-4 py-3">
-                          <ActionButtons doctor={doctor} />
-                        </td>
-                      </tr>
-                    ))
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
 
-            {filtered.length > 0 && (
-              <div
-                className="px-4 py-2.5 flex items-center justify-between"
-                style={{ borderTop: `1px solid ${border}`, background: headBg }}
-              >
-                <p className="text-xs" style={{ color: 'var(--cd-t5)' }}>
-                  {filtered.length} / {doctors.length} {t.total}
-                </p>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+            <div className="px-4 py-2.5 flex items-center justify-between"
+              style={{ borderTop: `1px solid ${border}`, background: headBg }}>
+              <p className="text-xs" style={{ color: 'var(--cd-t5)' }}>
+                {filtered.length} / {doctors.length} {t.total}
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

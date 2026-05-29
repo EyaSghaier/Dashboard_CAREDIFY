@@ -28,7 +28,7 @@ interface PatientDetail {
   allergies: string | null;
   patient_id: string | null;
   created_at: string;
-  // ✅ Antécédents cardiaques
+  // Antécédents cardiaques
   antecedent_infarctus: boolean | null;
   antecedent_trouble_rythme: boolean | null;
   antecedent_hospitalisation: boolean | null;

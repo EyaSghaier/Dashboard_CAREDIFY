@@ -44,7 +44,7 @@ const BGECGLine: React.FC<{ color: string }> = ({ color }) => {
 const i18n = {
   FR: {
     title: 'Mot de passe oublié', subtitle: 'Réinitialiser votre accès',
-    email: 'Adresse email professionnelle', emailPh: 'dr.docteur@hopital.fr',
+    email: 'Adresse email professionnelle', emailPh: 'docteur@caredify.tn',
     submit: 'Envoyer le lien', submitting: 'Envoi en cours...',
     back: 'Retour à la connexion',
     successTitle: 'Email envoyé !',
@@ -53,7 +53,7 @@ const i18n = {
   },
   EN: {
     title: 'Forgot password', subtitle: 'Reset your access',
-    email: 'Professional email address', emailPh: 'dr.doctor@hospital.com',
+    email: 'Professional email address', emailPh: 'doctor@caredify.tn',
     submit: 'Send reset link', submitting: 'Sending...',
     back: 'Back to sign in',
     successTitle: 'Email sent!',
