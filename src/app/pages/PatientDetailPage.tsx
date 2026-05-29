@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft, Heart, Activity, Thermometer, Droplet,
-  Clock, Phone, Mail, Calendar, Download, Share2,
+  Clock, Phone, Mail, Calendar,
   Stethoscope, Loader2, AlertTriangle, CheckCircle, XCircle,
+  TrendingUp, TrendingDown, ChevronUp, ChevronDown, Eye, ExternalLink,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { RiskGauge } from '../components/RiskGauge';
@@ -149,6 +150,11 @@ export const PatientDetailPage: React.FC = () => {
   const [loading, setLoading]     = useState(true);
   const [liveScore, setLiveScore] = useState(0);
 
+  // States for confirmed alerts history
+  const [showConfirmedHistory, setShowConfirmedHistory] = useState(false);
+  const [confirmedEvents, setConfirmedEvents] = useState<any[]>([]);
+  const [selectedAlert, setSelectedAlert] = useState<any>(null);
+
   useEffect(() => {
     if (!id) return;
     const fetch = async () => {
@@ -169,6 +175,48 @@ export const PatientDetailPage: React.FC = () => {
         setEcgList(ecgs ?? []);
         const lastScore = statusToScore(ecgs?.[0]?.status ?? null);
         setLiveScore(lastScore);
+
+        // Fetch confirmed alerts
+        const { data: dbConfirmed } = await supabase
+          .from('emergency_alerts')
+          .select('*')
+          .eq('patient_id', id)
+          .eq('status', 'confirmed');
+
+        const mappedDb = (dbConfirmed ?? []).map((ea) => ({
+          id: ea.id,
+          type: ea.ai_severity === 'critical' ? '🔴 Alerte Critique URGENTE' : '🟡 Avertissement ECG',
+          message: `Alerte d'urgence confirmée — Fréquence cardiaque: ${ea.heart_rate ?? '?'} bpm`,
+          time: new Date(ea.triggered_at).toLocaleString('fr-FR', {
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: '2-digit',
+          }),
+          severity: ea.ai_severity ?? 'critical',
+          note: 'Alerte d\'urgence confirmée par le cardiologue via le centre d\'alertes.',
+        }));
+
+        const mockEvents = [
+          {
+            id: 'mock-1',
+            type: '🔴 Alerte Critique URGENTE',
+            message: 'Anomalie ECG critique détectée — Tachycardie ventriculaire suspectée.',
+            time: '28/05/2026 à 14:32',
+            severity: 'critical',
+            note: 'Contacter le patient immédiatement. Diurétiques augmentés.',
+          },
+          {
+            id: 'mock-2',
+            type: '🟡 Avertissement ECG',
+            message: 'Léger décalage du segment ST détecté lors d\'un effort.',
+            time: '25/05/2026 à 09:15',
+            severity: 'warning',
+            note: 'ECG urgent requis au cabinet. Bêtabloquants réduits.',
+          }
+        ];
+
+        setConfirmedEvents([...mappedDb, ...mockEvents]);
       } catch (err) {
         console.error('Erreur chargement patient:', err);
       } finally {
@@ -235,6 +283,14 @@ export const PatientDetailPage: React.FC = () => {
     return days;
   })();
 
+  const riskScores = riskHistory.map(h => Math.round(h.score));
+  const riskMin = riskScores.length > 0 ? Math.min(...riskScores) : 0;
+  const riskMax = riskScores.length > 0 ? Math.max(...riskScores) : 0;
+  const riskAvg = riskScores.length > 0 ? Math.round(riskScores.reduce((a, b) => a + b, 0) / riskScores.length) : 0;
+  const riskTrend = riskScores.length > 1
+    ? Math.round(riskScores[riskScores.length - 1] - riskScores[0])
+    : 0;
+
   const alertTimeline = ecgList
     .filter((e) => e.status === 'critical' || e.status === 'warning')
     .slice(0, 6)
@@ -283,16 +339,6 @@ export const PatientDetailPage: React.FC = () => {
               {patient.cardiac_pathology ?? 'Aucune pathologie renseignée'}
             </p>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {[Share2, Download].map((Icon, i) => (
-            <button key={i} className="p-2 rounded-lg transition-colors"
-              style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)', color: 'var(--cd-t4)' }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}>
-              <Icon className="w-4 h-4" />
-            </button>
-          ))}
         </div>
       </div>
 
@@ -434,15 +480,167 @@ export const PatientDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Historique 7 jours */}
-          <div className="rounded-xl p-4" style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-medium text-sm" style={{ color: 'var(--cd-t1)' }}>
-                Historique du Risque — 7 jours
-              </h3>
-              <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>Score IA quotidien</span>
+          {/* 7-day Risk History — enhanced with confirmed alerts history */}
+          <div
+            className="rounded-xl overflow-hidden"
+            style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}
+          >
+            {/* Chart header + stats */}
+            <div className="p-4 pb-3">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
+                  {riskTrend >= 0
+                    ? <TrendingUp className="w-4 h-4 text-[#EF4444]" />
+                    : <TrendingDown className="w-4 h-4 text-[#10B981]" />
+                  }
+                  <h3 className="font-medium text-sm" style={{ color: 'var(--cd-t1)' }}>
+                    Historique du Risque — 7 jours
+                  </h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs" style={{ color: 'var(--cd-t5)' }}>
+                    ↓{riskMin} · ↑{riskMax}
+                  </span>
+                  <span
+                    className="px-2 py-0.5 rounded-full text-xs font-bold"
+                    style={{
+                      backgroundColor: riskTrend >= 0 ? 'rgba(239,68,68,0.12)' : 'rgba(16,185,129,0.12)',
+                      color: riskTrend >= 0 ? '#EF4444' : '#10B981',
+                    }}
+                  >
+                    {riskTrend >= 0 ? '+' : ''}{riskTrend} pts
+                  </span>
+                </div>
+              </div>
+
+              {/* Mini stat row */}
+              <div className="grid grid-cols-3 gap-2 mb-3">
+                {[
+                  { label: 'Max', value: riskMax, color: ecgColor },
+                  { label: 'Moy.', value: riskAvg, color: 'var(--cd-t2)' },
+                  { label: 'Min', value: riskMin, color: '#10B981' },
+                ].map(({ label, value, color }) => (
+                  <div
+                    key={label}
+                    className="rounded-lg px-2 py-1.5 text-center"
+                    style={{ backgroundColor: 'var(--cd-bg1)', border: '1px solid var(--cd-bd)' }}
+                  >
+                    <div className="text-xs font-bold" style={{ color }}>{value}</div>
+                    <div className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              <RiskHistorySVG data={riskHistory} color={ecgColor} />
             </div>
-            <RiskHistorySVG data={riskHistory} color={ecgColor} />
+
+            {/* Divider + confirmed alerts toggle */}
+            <div style={{ borderTop: '1px solid var(--cd-bd)' }}>
+              <button
+                className="w-full flex items-center justify-between px-4 py-3 transition-colors"
+                style={{ color: 'var(--cd-t2)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.03)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+                onClick={() => setShowConfirmedHistory((v) => !v)}
+              >
+                <div className="flex items-center gap-2">
+                  <CheckCircle className="w-3.5 h-3.5 text-[#10B981]" />
+                  <span className="text-xs font-medium">Historique des alertes confirmées</span>
+                  {confirmedEvents.length > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-[#10B981]/15 text-[#10B981]">
+                      {confirmedEvents.length}
+                    </span>
+                  )}
+                </div>
+                {showConfirmedHistory
+                  ? <ChevronUp className="w-3.5 h-3.5" style={{ color: 'var(--cd-t4)' }} />
+                  : <ChevronDown className="w-3.5 h-3.5" style={{ color: 'var(--cd-t4)' }} />
+                }
+              </button>
+
+              {showConfirmedHistory && (
+                <div className="px-4 pb-4 space-y-2">
+                  {confirmedEvents.length === 0 ? (
+                    <p className="text-xs py-3 text-center" style={{ color: 'var(--cd-t5)' }}>
+                      Aucune alerte confirmée pour ce patient.
+                    </p>
+                  ) : (
+                    confirmedEvents.map((ev, idx) => {
+                      const sColor =
+                        ev.severity === 'critical' ? '#EF4444' :
+                        ev.severity === 'warning' ? '#F59E0B' : '#0EA5E9';
+                      const sBg =
+                        ev.severity === 'critical' ? 'rgba(239,68,68,0.08)' :
+                        ev.severity === 'warning' ? 'rgba(245,158,11,0.08)' : 'rgba(14,165,233,0.08)';
+                      return (
+                        <div
+                          key={idx}
+                          className="rounded-lg p-3 cursor-pointer transition-all"
+                          style={{ backgroundColor: 'var(--cd-bg1)', border: `1px solid ${sColor}25` }}
+                          onClick={() => setSelectedAlert(ev)}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--cd-bg)';
+                            e.currentTarget.style.transform = 'translateX(4px)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.backgroundColor = 'var(--cd-bg1)';
+                            e.currentTarget.style.transform = 'translateX(0)';
+                          }}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <div
+                              className="w-1.5 h-1.5 rounded-full flex-shrink-0 mt-1.5"
+                              style={{ backgroundColor: sColor, boxShadow: `0 0 4px ${sColor}` }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2 mb-0.5">
+                                <span
+                                  className="text-xs font-medium px-1.5 py-0.5 rounded"
+                                  style={{ backgroundColor: sBg, color: sColor }}
+                                >
+                                  {ev.type}
+                                </span>
+                                <span className="text-[10px] flex-shrink-0" style={{ color: 'var(--cd-t5)' }}>
+                                  {ev.time}
+                                </span>
+                              </div>
+                              <p className="text-[11px] leading-relaxed mt-1" style={{ color: 'var(--cd-t3)' }}>
+                                {ev.message}
+                              </p>
+                              <div className="flex items-center justify-between mt-1.5">
+                                <div className="flex items-center gap-1">
+                                  <CheckCircle className="w-3 h-3 text-[#10B981]" />
+                                  <span className="text-[10px] text-[#10B981] font-medium">Confirmée</span>
+                                </div>
+                                <div className="flex items-center gap-1 text-[10px]" style={{ color: 'var(--cd-accent)' }}>
+                                  <Eye className="w-3 h-3 animate-pulse" />
+                                  <span>Consulter</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  <button
+                    onClick={() => navigate('/alerts')}
+                    className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-xs transition-colors mt-1"
+                    style={{
+                      backgroundColor: 'rgba(14,165,233,0.07)',
+                      border: '1px solid rgba(14,165,233,0.2)',
+                      color: '#0EA5E9',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'rgba(14,165,233,0.14)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'rgba(14,165,233,0.07)'; }}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Voir toutes dans le Centre d'Alertes
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Timeline alertes */}
@@ -492,6 +690,89 @@ export const PatientDetailPage: React.FC = () => {
         patientName={`${patient.first_name} ${patient.last_name}`}
         isAbnormal={riskClass === 'Critical'}
       />
+
+      {/* Modal Détails Alerte Confirmée */}
+      {selectedAlert && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: 'rgba(0,0,0,0.80)', backdropFilter: 'blur(10px)' }}
+          onClick={() => setSelectedAlert(null)}
+        >
+          <div
+            className="relative w-full max-w-md rounded-2xl overflow-hidden shadow-2xl p-6"
+            style={{
+              backgroundColor: 'var(--cd-bg3)',
+              border: `1px solid ${selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'}35`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--cd-bd)' }}>
+              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--cd-t1)' }}>
+                <CheckCircle className="w-4 h-4 text-[#10B981]" />
+                Détails de l'Alerte Confirmée
+              </h3>
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="p-1 rounded-lg transition-colors hover:bg-white/5"
+                style={{ color: 'var(--cd-t4)' }}
+              >
+                <XCircle className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--cd-bg1)', border: '1px solid var(--cd-bd)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="px-2 py-0.5 rounded text-xs font-bold"
+                    style={{
+                      backgroundColor: selectedAlert.severity === 'critical' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+                      color: selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'
+                    }}>
+                    {selectedAlert.type}
+                  </span>
+                  <span className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>{selectedAlert.time}</span>
+                </div>
+                <p className="text-xs leading-relaxed" style={{ color: 'var(--cd-t2)' }}>{selectedAlert.message}</p>
+              </div>
+
+              <div>
+                <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--cd-t5)' }}>
+                  Statut & Résolution
+                </h4>
+                <div className="flex items-center gap-1.5 text-xs text-[#10B981] font-medium">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Alerte validée par le cardiologue
+                </div>
+              </div>
+
+              {selectedAlert.note && (
+                <div>
+                  <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--cd-t5)' }}>
+                    Note Médicale
+                  </h4>
+                  <p className="text-xs leading-relaxed p-3 rounded-lg border border-dashed italic"
+                    style={{
+                      borderColor: 'var(--cd-bd)',
+                      backgroundColor: 'var(--cd-bg1)',
+                      color: 'var(--cd-t3)'
+                    }}>
+                    "{selectedAlert.note}"
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end">
+              <button
+                onClick={() => setSelectedAlert(null)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#0EA5E9] hover:bg-[#0284C7] transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Search, Phone, Video, MoreVertical,
   Paperclip, Smile, Loader2, CheckCheck, Star,
+  FileText, Download, X, Lock, Shield,
 } from 'lucide-react';
 import { useLang } from '../context/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -54,6 +55,25 @@ export const MessagesPage: React.FC = () => {
   const [selectedId, setSelectedId]   = useState<string>('');
   const [inputText, setInputText]     = useState('');
   const [search, setSearch]           = useState('');
+
+  // States & Refs for emoji picker, permissions, and file attachments
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showPermissionModal, setShowPermissionModal] = useState(false);
+  const [filePermission, setFilePermission] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('caredify_file_permission') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [selectedFile, setSelectedFile] = useState<{
+    name: string;
+    size: string;
+    type: string;
+    dataUrl: string;
+  } | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const doctorUidRef   = useRef<string>('');
   const selectedIdRef  = useRef<string>('');
@@ -455,21 +475,81 @@ export const MessagesPage: React.FC = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConvo?.messages.length]);
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formatBytes = (bytes: number, decimals = 1) => {
+      if (bytes === 0) return '0 Bytes';
+      const k = 1024;
+      const dm = decimals < 0 ? 0 : decimals;
+      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    };
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (event.target?.result) {
+        setSelectedFile({
+          name: file.name,
+          size: formatBytes(file.size),
+          type: file.type,
+          dataUrl: event.target.result as string,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  const handlePaperclipClick = () => {
+    if (!filePermission) {
+      setShowPermissionModal(true);
+    } else {
+      fileInputRef.current?.click();
+    }
+  };
+
+  const grantFilePermission = () => {
+    try {
+      localStorage.setItem('caredify_file_permission', 'true');
+    } catch {}
+    setFilePermission(true);
+    setShowPermissionModal(false);
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 150);
+  };
+
   // ── 5. Envoyer message ──────────────────────────────────────────
   const sendMessage = async () => {
-    const content = inputText.trim();
+    const textContent = inputText.trim();
     const myUid   = doctorUidRef.current;
     const convo   = convosRef.current.find((c) => c.id === selectedIdRef.current);
-    if (!content || !convo || !myUid) return;
+    if ((!textContent && !selectedFile) || !convo || !myUid) return;
+
+    let content = textContent;
+    if (selectedFile) {
+      if (selectedFile.type.startsWith('image/')) {
+        content = `[IMAGE:${selectedFile.name}|${selectedFile.dataUrl}]${textContent ? ` ${textContent}` : ''}`;
+      } else {
+        content = `[FILE:${selectedFile.name}|${selectedFile.size}|${selectedFile.dataUrl}]${textContent ? ` ${textContent}` : ''}`;
+      }
+    }
 
     setInputText('');
+    setSelectedFile(null);
     const { error } = await supabase.from('messages').insert({
       conversation_id: convo.conversationId,
       sender_id:       myUid,
       receiver_id:     convo.id,
       content,
     });
-    if (error) { console.error('Erreur envoi:', error); setInputText(content); }
+    if (error) { 
+      console.error('Erreur envoi:', error); 
+      setInputText(textContent); 
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -823,12 +903,87 @@ export const MessagesPage: React.FC = () => {
                         : 'var(--cd-hv)',
                     }}
                   >
-                    <p
-                      className={`text-sm leading-relaxed ${msg.isFromMe ? 'text-white' : ''}`}
-                      style={!msg.isFromMe ? { color: 'var(--cd-t1)' } : undefined}
-                    >
-                      {msg.content}
-                    </p>
+                    {(() => {
+                      const imageMatch = msg.content.match(/^\[IMAGE:(.*?)\|(.*?)\](.*)$/s);
+                      const fileMatch = msg.content.match(/^\[FILE:(.*?)\|(.*?)\|(.*?)\](.*)$/s);
+
+                      if (imageMatch) {
+                        const [_, name, url, text] = imageMatch;
+                        return (
+                          <div className="flex flex-col gap-2 max-w-full">
+                            <div className="relative group overflow-hidden rounded-xl border border-white/10 shadow-md">
+                              <img 
+                                src={url} 
+                                alt={name} 
+                                className="max-w-xs max-h-60 object-cover cursor-pointer hover:scale-[1.02] transition-transform duration-200 rounded-xl"
+                                onClick={() => {
+                                  // Open raw base64 or URL in new tab
+                                  const newTab = window.open();
+                                  if (newTab) newTab.document.write(`<img src="${url}" style="max-width:100%" />`);
+                                }}
+                              />
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200 pointer-events-none rounded-xl">
+                                <span className="text-white text-xs font-semibold px-2.5 py-1 bg-black/60 rounded-md backdrop-blur-sm">
+                                  {lang === 'FR' ? 'Afficher' : 'View'}
+                                </span>
+                              </div>
+                            </div>
+                            {text.trim() && (
+                              <p className={`text-sm leading-relaxed ${msg.isFromMe ? 'text-white' : ''}`} style={!msg.isFromMe ? { color: 'var(--cd-t1)' } : undefined}>
+                                {text}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      if (fileMatch) {
+                        const [_, name, size, url, text] = fileMatch;
+                        return (
+                          <div className="flex flex-col gap-2 max-w-full">
+                            <a 
+                              href={url} 
+                              download={name}
+                              className={`flex items-center gap-3 p-3 rounded-xl border transition-all ${
+                                msg.isFromMe
+                                  ? 'bg-white/10 hover:bg-white/15 border-white/15 text-white'
+                                  : 'border-var(--cd-bd) hover:opacity-90'
+                              }`}
+                              style={!msg.isFromMe ? { backgroundColor: 'var(--cd-bg3)', borderColor: 'var(--cd-bd)' } : undefined}
+                            >
+                              <div className={`p-2 rounded-lg ${msg.isFromMe ? 'bg-white/10 text-white' : 'bg-[#0EA5E9]/10 text-[#0EA5E9]'}`}>
+                                <FileText className="w-5 h-5" />
+                              </div>
+                              <div className="flex-1 min-w-0 text-left">
+                                <p className="text-xs font-bold truncate max-w-[120px] sm:max-w-[180px]" style={msg.isFromMe ? { color: '#ffffff' } : { color: 'var(--cd-t1)' }}>
+                                  {name}
+                                </p>
+                                <p className="text-[10px] opacity-70" style={msg.isFromMe ? { color: 'rgba(255,255,255,0.7)' } : { color: 'var(--cd-t4)' }}>
+                                  {size}
+                                </p>
+                              </div>
+                              <div className={`p-1.5 rounded-full ${msg.isFromMe ? 'bg-white/10 hover:bg-white/20' : 'bg-black/5 dark:bg-white/5 hover:bg-black/10'}`}>
+                                <Download className="w-3.5 h-3.5" />
+                              </div>
+                            </a>
+                            {text.trim() && (
+                              <p className={`text-sm leading-relaxed ${msg.isFromMe ? 'text-white' : ''}`} style={!msg.isFromMe ? { color: 'var(--cd-t1)' } : undefined}>
+                                {text}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <p
+                          className={`text-sm leading-relaxed ${msg.isFromMe ? 'text-white' : ''}`}
+                          style={!msg.isFromMe ? { color: 'var(--cd-t1)' } : undefined}
+                        >
+                          {msg.content}
+                        </p>
+                      );
+                    })()}
                     <div className="flex items-center justify-end gap-1 mt-1">
                       <span className="text-[10px]"
                         style={
@@ -861,13 +1016,107 @@ export const MessagesPage: React.FC = () => {
           </div>
 
           {/* Input */}
-          <div className="px-4 py-3"
+          <div className="px-4 py-3 relative"
             style={{ backgroundColor: 'var(--cd-bg2)', borderTop: '1px solid var(--cd-bd)' }}>
+            
+            {/* Hidden File Input */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={handleFileChange}
+            />
+
+            {/* Selected File Preview Card */}
+            {selectedFile && (
+              <div className="flex items-center gap-3 p-2 mb-2.5 rounded-xl border border-[#0EA5E9]/35 bg-[#0EA5E9]/5 animate-fadeIn">
+                {selectedFile.type.startsWith('image/') ? (
+                  <img 
+                    src={selectedFile.dataUrl} 
+                    alt="Preview" 
+                    className="w-10 h-10 object-cover rounded-lg border border-white/10" 
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-[#0EA5E9]/10 text-[#0EA5E9] flex items-center justify-center flex-shrink-0">
+                    <FileText className="w-5 h-5" />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0 text-left">
+                  <p className="text-xs font-semibold truncate text-[var(--cd-t1)]">{selectedFile.name}</p>
+                  <p className="text-[10px] text-[var(--cd-t4)]">{selectedFile.size}</p>
+                </div>
+                <button 
+                  onClick={() => setSelectedFile(null)}
+                  className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--cd-t4)] hover:text-red-500 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            {/* Emoji Picker Popover */}
+            {showEmojiPicker && (
+              <div 
+                className="absolute bottom-16 right-4 z-50 rounded-2xl p-3 shadow-2xl w-72 sm:w-80 flex flex-col border border-var(--cd-bd) animate-fadeIn"
+                style={{ 
+                  backgroundColor: 'var(--cd-bg3)', 
+                  borderColor: 'var(--cd-bd)',
+                  backdropFilter: 'blur(16px)'
+                }}
+              >
+                <div className="flex items-center justify-between mb-2 pb-2 border-b border-var(--cd-bd)" style={{ borderColor: 'var(--cd-bd)' }}>
+                  <span className="text-xs font-bold text-[var(--cd-t1)] flex items-center gap-1.5">
+                    <Smile className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                    {lang === 'FR' ? 'Choisir un émoji' : 'Select Emoji'}
+                  </span>
+                  <button 
+                    onClick={() => setShowEmojiPicker(false)}
+                    className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--cd-t4)]"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-8 gap-2 overflow-y-auto max-h-48 p-1 scrollbar-thin">
+                  {[
+                    // Faces & expressions
+                    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', 
+                    '🙂', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', 
+                    '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', 
+                    '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', 
+                    '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', 
+                    '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', 
+                    // Gestures & hands
+                    '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟', 
+                    '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', 
+                    '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', 
+                    // Medical & health
+                    '🏥', '🩺', '💊', '💉', '🩹', '🫀', '🫁', '🧠', '🩸', '🤒', 
+                    '🤕', '😷', '⚕️', '❤️', '💖', '💙', '💚', '💛', '💜', '🧡'
+                  ].map((emoji) => (
+                    <button
+                      key={emoji}
+                      onClick={() => {
+                        setInputText((prev) => prev + emoji);
+                        setShowEmojiPicker(false);
+                      }}
+                      className="w-8 h-8 flex items-center justify-center text-lg rounded-lg hover:bg-black/5 dark:hover:bg-white/5 hover:scale-110 active:scale-95 transition-all duration-150"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2 rounded-xl px-3 py-2"
               style={{ backgroundColor: 'var(--cd-bg3)', border: '1px solid var(--cd-bd)' }}>
-              <button className="p-1 transition-colors" style={{ color: 'var(--cd-t4)' }}
+              <button 
+                onClick={handlePaperclipClick}
+                className="p-1 transition-colors" 
+                style={{ color: 'var(--cd-t4)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}>
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}
+              >
                 <Paperclip className="w-4 h-4" />
               </button>
               <input
@@ -878,17 +1127,21 @@ export const MessagesPage: React.FC = () => {
                 className="flex-1 bg-transparent text-sm outline-none"
                 style={{ color: 'var(--cd-t1)' }}
               />
-              <button className="p-1 transition-colors" style={{ color: 'var(--cd-t4)' }}
+              <button 
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                className="p-1 transition-colors" 
+                style={{ color: showEmojiPicker ? '#0EA5E9' : 'var(--cd-t4)' }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}>
+                onMouseLeave={(e) => { if (!showEmojiPicker) e.currentTarget.style.color = 'var(--cd-t4)'; }}
+              >
                 <Smile className="w-4 h-4" />
               </button>
               <button
                 onClick={sendMessage}
-                disabled={!inputText.trim()}
+                disabled={!inputText.trim() && !selectedFile}
                 className="p-1.5 rounded-lg transition-all disabled:opacity-40"
                 style={{
-                  background: inputText.trim()
+                  background: (inputText.trim() || selectedFile)
                     ? 'linear-gradient(135deg, #0EA5E9, #0284c7)'
                     : 'var(--cd-hv)',
                 }}
@@ -914,6 +1167,49 @@ export const MessagesPage: React.FC = () => {
             <p>
               {lang === 'FR' ? 'Sélectionnez une conversation' : 'Select a conversation'}
             </p>
+          </div>
+        </div>
+      )}
+
+      {/* File access permission modal */}
+      {showPermissionModal && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div 
+            className="w-full max-w-md p-6 rounded-2xl shadow-2xl border text-center animate-scaleUp"
+            style={{ 
+              backgroundColor: 'var(--cd-bg3)', 
+              borderColor: 'var(--cd-bd)' 
+            }}
+          >
+            <div className="w-12 h-12 rounded-full bg-[#0EA5E9]/15 flex items-center justify-center mx-auto mb-4 border border-[#0EA5E9]/30">
+              <Shield className="w-6 h-6 text-[#0EA5E9]" />
+            </div>
+            
+            <h3 className="text-lg font-bold mb-2 text-[var(--cd-t1)]">
+              {lang === 'FR' ? "Autorisation d'accès aux fichiers" : "File Sharing Access Requested"}
+            </h3>
+            
+            <p className="text-xs mb-6 text-[var(--cd-t4)] leading-relaxed">
+              {lang === 'FR' 
+                ? "Pour envoyer des rapports d'ECG, des ordonnances ou des images de suivi, Caredify requiert votre permission pour lire les fichiers locaux. Vos documents sont chiffrés et transmis en toute sécurité."
+                : "To send ECG records, prescriptions, or follow-up images, Caredify requires your permission to read local files. Your documents are encrypted and transmitted securely."}
+            </p>
+            
+            <div className="flex gap-3 justify-center">
+              <button
+                onClick={() => setShowPermissionModal(false)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl hover:bg-black/5 border border-var(--cd-bd) text-[var(--cd-t3)]"
+              >
+                {lang === 'FR' ? 'Refuser' : 'Deny'}
+              </button>
+              
+              <button
+                onClick={grantFilePermission}
+                className="px-5 py-2 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-[#0EA5E9] to-[#0284c7] hover:scale-105 transition-all shadow-md shadow-[#0ea5e9]/20"
+              >
+                {lang === 'FR' ? "Autoriser l'accès" : "Allow Access"}
+              </button>
+            </div>
           </div>
         </div>
       )}

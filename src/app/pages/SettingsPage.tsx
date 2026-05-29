@@ -26,7 +26,6 @@ const t = {
     togglePush: 'Notifications push', togglePushDesc: 'Notifications navigateur en temps réel',
     toggleSound: 'Alertes sonores', toggleSoundDesc: 'Son pour les alertes critiques',
     toggleCriticalOnly: 'Critiques uniquement', toggleCriticalOnlyDesc: "N'envoyer que les alertes de niveau critique",
-    toggleWeekly: 'Rapport hebdomadaire', toggleWeeklyDesc: 'Résumé PDF chaque lundi matin',
     toggleDaily: 'Résumé quotidien', toggleDailyDesc: 'Bilan des patients chaque soir à 18h',
     systemTitle: 'Système & Sécurité', systemSub: 'Configuration technique',
     reset: 'Réinitialiser les paramètres par défaut',
@@ -64,7 +63,6 @@ const t = {
     togglePush: 'Push notifications', togglePushDesc: 'Real-time browser notifications',
     toggleSound: 'Sound alerts', toggleSoundDesc: 'Sound for critical alerts',
     toggleCriticalOnly: 'Critical only', toggleCriticalOnlyDesc: 'Send only critical-level alerts',
-    toggleWeekly: 'Weekly report', toggleWeeklyDesc: 'PDF summary every Monday morning',
     toggleDaily: 'Daily digest', toggleDailyDesc: 'Patient summary every evening at 6pm',
     systemTitle: 'System & Security', systemSub: 'Technical configuration',
     reset: 'Reset to default settings',
@@ -133,7 +131,7 @@ export const SettingsPage: React.FC = () => {
 
   const [notifications, setNotifications] = useState({
     emailAlerts: true, smsAlerts: false, pushNotifications: true,
-    criticalOnly: false, soundAlerts: true, weeklyReport: true, dailyDigest: false,
+    criticalOnly: false, soundAlerts: true, dailyDigest: false,
   });
 
   // ✅ FIX PRINCIPAL : un seul useEffect propre
@@ -249,7 +247,6 @@ export const SettingsPage: React.FC = () => {
     { key: 'pushNotifications', label: tr.togglePush,         desc: tr.togglePushDesc },
     { key: 'soundAlerts',       label: tr.toggleSound,        desc: tr.toggleSoundDesc },
     { key: 'criticalOnly',      label: tr.toggleCriticalOnly, desc: tr.toggleCriticalOnlyDesc },
-    { key: 'weeklyReport',      label: tr.toggleWeekly,       desc: tr.toggleWeeklyDesc },
     { key: 'dailyDigest',       label: tr.toggleDaily,        desc: tr.toggleDailyDesc },
   ];
 
