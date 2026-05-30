@@ -4,19 +4,32 @@
 
 /* Dark theme (default) */
 :root {
-  --cd-bg1: #0B1120;     /* page background */
-  --cd-bg2: #0D1526;     /* sidebar / header background */
-  --cd-bg3: #111827;     /* card / panel background */
-  --cd-bg4: #0B1120;     /* inset / input background */
-  --cd-bd: #1F2937;      /* border */
-  --cd-bd2: rgba(31, 41, 55, 0.5); /* soft border */
-  --cd-hv: #1F2937;      /* hover background */
-  --cd-hv2: #374151;     /* stronger hover */
-  --cd-t1: #F9FAFB;      /* primary text */
-  --cd-t2: #E5E7EB;      /* secondary text */
-  --cd-t3: #9CA3AF;      /* tertiary text */
-  --cd-t4: #6B7280;      /* muted text */
-  --cd-t5: #4B5563;      /* faint / placeholder text */
+  --cd-bg1: #0B1120;
+  /* page background */
+  --cd-bg2: #0D1526;
+  /* sidebar / header background */
+  --cd-bg3: #111827;
+  /* card / panel background */
+  --cd-bg4: #0B1120;
+  /* inset / input background */
+  --cd-bd: #1F2937;
+  /* border */
+  --cd-bd2: rgba(31, 41, 55, 0.5);
+  /* soft border */
+  --cd-hv: #1F2937;
+  /* hover background */
+  --cd-hv2: #374151;
+  /* stronger hover */
+  --cd-t1: #F9FAFB;
+  /* primary text */
+  --cd-t2: #E5E7EB;
+  /* secondary text */
+  --cd-t3: #9CA3AF;
+  /* tertiary text */
+  --cd-t4: #6B7280;
+  /* muted text */
+  --cd-t5: #4B5563;
+  /* faint / placeholder text */
   --cd-scrollbar-track: #0B1120;
   --cd-scrollbar-thumb: #1F2937;
   --cd-scrollbar-thumb-hover: #374151;
@@ -131,11 +144,43 @@ input[type='range']::-moz-range-thumb {
 }
 
 /* ═══════════════════════════════════════════════════════
+   Shared UI animations (emoji picker, modals, toasts)
+   ═══════════════════════════════════════════════════════ */
+@keyframes cd-fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cd-scaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
    Pulse animation for map markers
    ═══════════════════════════════════════════════════════ */
 @keyframes pulse-ring {
-  0% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(2.5); opacity: 0; }
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
 }
 
 .pulse-critical::before {
@@ -158,7 +203,7 @@ input[type='range']::-moz-range-thumb {
 
 /* Light theme: give cards a subtle shadow instead of just border */
 [data-theme="light"] .cd-card-shadow {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 /* ECG canvas light theme background */

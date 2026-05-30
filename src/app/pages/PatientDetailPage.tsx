@@ -5,6 +5,7 @@ import {
   Clock, Phone, Mail, Calendar,
   Stethoscope, Loader2, AlertTriangle, CheckCircle, XCircle,
   TrendingUp, TrendingDown, ChevronUp, ChevronDown, Eye, ExternalLink,
+  MapPin, X,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import { RiskGauge } from '../components/RiskGauge';
@@ -691,7 +692,7 @@ export const PatientDetailPage: React.FC = () => {
         isAbnormal={riskClass === 'Critical'}
       />
 
-      {/* Modal Détails Alerte Confirmée */}
+      {/* Modal Détails Alerte — version enrichie */}
       {selectedAlert && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -699,77 +700,202 @@ export const PatientDetailPage: React.FC = () => {
           onClick={() => setSelectedAlert(null)}
         >
           <div
-            className="relative w-full max-w-md rounded-2xl overflow-hidden shadow-2xl p-6"
+            className="rounded-2xl p-6 max-w-3xl w-full max-h-[90vh] overflow-y-auto"
             style={{
-              backgroundColor: 'var(--cd-bg3)',
-              border: `1px solid ${selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'}35`,
+              background: 'var(--cd-card, var(--cd-bg3))',
+              border: '1px solid var(--cd-bd)',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4 pb-3" style={{ borderBottom: '1px solid var(--cd-bd)' }}>
-              <h3 className="text-sm font-bold flex items-center gap-2" style={{ color: 'var(--cd-t1)' }}>
-                <CheckCircle className="w-4 h-4 text-[#10B981]" />
-                Détails de l'Alerte Confirmée
-              </h3>
+            {/* Header */}
+            <div className="flex items-start justify-between mb-6">
+              <div className="flex-1">
+                <div className="flex items-center gap-3 mb-2">
+                  <div
+                    className="w-10 h-10 rounded-xl flex items-center justify-center"
+                    style={{
+                      background: selectedAlert.severity === 'critical'
+                        ? 'rgba(239,68,68,0.1)'
+                        : 'rgba(245,158,11,0.1)',
+                    }}
+                  >
+                    <Activity
+                      size={20}
+                      style={{
+                        color: selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B',
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <h2 className="font-semibold text-lg" style={{ color: 'var(--cd-t1)' }}>
+                      Détails de l'Alerte
+                    </h2>
+                    <p className="text-xs" style={{ color: 'var(--cd-t4)' }}>
+                      {patient.first_name} {patient.last_name}
+                    </p>
+                  </div>
+                </div>
+              </div>
               <button
                 onClick={() => setSelectedAlert(null)}
-                className="p-1 rounded-lg transition-colors hover:bg-white/5"
-                style={{ color: 'var(--cd-t4)' }}
+                className="p-2 rounded-lg transition-colors"
+                style={{
+                  background: 'var(--cd-bg)',
+                  border: '1px solid var(--cd-bd)',
+                  color: 'var(--cd-t4)',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--cd-t4)'; }}
               >
-                <XCircle className="w-4 h-4" />
+                <X size={18} />
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div className="rounded-lg p-3" style={{ backgroundColor: 'var(--cd-bg1)', border: '1px solid var(--cd-bd)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="px-2 py-0.5 rounded text-xs font-bold"
-                    style={{
-                      backgroundColor: selectedAlert.severity === 'critical' ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
-                      color: selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'
-                    }}>
-                    {selectedAlert.type}
-                  </span>
-                  <span className="text-[10px]" style={{ color: 'var(--cd-t5)' }}>{selectedAlert.time}</span>
+            {/* Informations principales */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+              <div
+                className="rounded-xl p-4"
+                style={{ background: 'var(--cd-bg)', border: '1px solid var(--cd-bd)' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Clock size={16} style={{ color: '#0EA5E9' }} />
+                  <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>Date &amp; Heure</span>
                 </div>
-                <p className="text-xs leading-relaxed" style={{ color: 'var(--cd-t2)' }}>{selectedAlert.message}</p>
+                <p className="font-semibold text-sm" style={{ color: 'var(--cd-t1)' }}>
+                  {new Date().toLocaleDateString('fr-FR')} — {selectedAlert.time}
+                </p>
               </div>
 
-              <div>
-                <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--cd-t5)' }}>
-                  Statut & Résolution
-                </h4>
-                <div className="flex items-center gap-1.5 text-xs text-[#10B981] font-medium">
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  Alerte validée par le cardiologue
+              <div
+                className="rounded-xl p-4"
+                style={{ background: 'var(--cd-bg)', border: '1px solid var(--cd-bd)' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Stethoscope size={16} style={{ color: '#0EA5E9' }} />
+                  <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>Score IA</span>
                 </div>
+                <p className="font-semibold text-xl" style={{ color: '#0EA5E9' }}>
+                  {Math.round(liveScore)}/100
+                </p>
               </div>
 
-              {selectedAlert.note && (
-                <div>
-                  <h4 className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--cd-t5)' }}>
-                    Note Médicale
-                  </h4>
-                  <p className="text-xs leading-relaxed p-3 rounded-lg border border-dashed italic"
-                    style={{
-                      borderColor: 'var(--cd-bd)',
-                      backgroundColor: 'var(--cd-bg1)',
-                      color: 'var(--cd-t3)'
-                    }}>
-                    "{selectedAlert.note}"
+              <div
+                className="rounded-xl p-4"
+                style={{ background: 'var(--cd-bg)', border: '1px solid var(--cd-bd)' }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <MapPin size={16} style={{ color: '#10B981' }} />
+                  <span className="text-xs" style={{ color: 'var(--cd-t4)' }}>Localisation</span>
+                </div>
+                <p className="font-semibold text-sm" style={{ color: 'var(--cd-t1)' }}>
+                  {(patient as any).city ?? 'N/A'}
+                </p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--cd-t4)' }}>
+                  {(patient as any).postal_code ?? ''}
+                </p>
+              </div>
+            </div>
+
+            {/* Type et message */}
+            <div
+              className="rounded-xl p-4 mb-6"
+              style={{
+                background: selectedAlert.severity === 'critical'
+                  ? 'rgba(239,68,68,0.05)'
+                  : 'rgba(245,158,11,0.05)',
+                border: `1px solid ${selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'}30`,
+              }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <span
+                  className="text-xs font-medium px-2 py-1 rounded"
+                  style={{
+                    background: selectedAlert.severity === 'critical'
+                      ? 'rgba(239,68,68,0.15)'
+                      : 'rgba(245,158,11,0.15)',
+                    color: selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B',
+                  }}
+                >
+                  {selectedAlert.type}
+                </span>
+                <span
+                  className="text-xs px-2 py-1 rounded"
+                  style={{ background: 'var(--cd-bg)', color: 'var(--cd-t4)' }}
+                >
+                  {selectedAlert.severity === 'critical' ? 'CRITIQUE' : 'AVERTISSEMENT'}
+                </span>
+              </div>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--cd-t2)' }}>
+                {selectedAlert.message}
+              </p>
+            </div>
+
+            {/* ECG au moment de l'alerte */}
+            <div
+              className="rounded-xl p-5"
+              style={{ background: 'var(--cd-bg)', border: '1px solid var(--cd-bd)' }}
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <Activity size={18} style={{ color: '#0EA5E9' }} />
+                <h3 className="font-medium" style={{ color: 'var(--cd-t1)' }}>
+                  ECG au moment de l'alerte
+                </h3>
+              </div>
+              <div
+                className="rounded-lg p-4"
+                style={{ background: '#000', border: '1px solid var(--cd-bd)' }}
+              >
+                <ECGCanvas
+                  heartRate={heartRate}
+                  color={selectedAlert.severity === 'critical' ? '#EF4444' : '#F59E0B'}
+                  isAbnormal={selectedAlert.severity === 'critical'}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-3 mt-4">
+                <div className="text-center">
+                  <p className="text-xs mb-1" style={{ color: 'var(--cd-t4)' }}>Fréquence</p>
+                  <p className="font-semibold" style={{ color: 'var(--cd-t1)' }}>{heartRate} bpm</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-xs mb-1" style={{ color: 'var(--cd-t4)' }}>Tension</p>
+                  <p className="font-semibold" style={{ color: 'var(--cd-t1)' }}>
+                    {(patient as any).blood_pressure ?? '—'}
                   </p>
                 </div>
-              )}
+                <div className="text-center">
+                  <p className="text-xs mb-1" style={{ color: 'var(--cd-t4)' }}>FEVG</p>
+                  <p className="font-semibold" style={{ color: 'var(--cd-t1)' }}>
+                    {(patient as any).ejection_fraction != null
+                      ? `${(patient as any).ejection_fraction}%`
+                      : '—'}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <div className="mt-6 flex justify-end">
-              <button
-                onClick={() => setSelectedAlert(null)}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-[#0EA5E9] hover:bg-[#0284C7] transition-colors"
-              >
-                Fermer
-              </button>
-            </div>
+            {/* Note médicale si présente */}
+            {selectedAlert.note && (
+              <div className="mt-4 rounded-xl p-4" style={{ background: 'var(--cd-bg)', border: '1px solid var(--cd-bd)' }}>
+                <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--cd-t5)' }}>
+                  Note Médicale
+                </p>
+                <p className="text-xs leading-relaxed italic" style={{ color: 'var(--cd-t3)' }}>
+                  "{selectedAlert.note}"
+                </p>
+              </div>
+            )}
+
+            {/* Bouton fermer */}
+            <button
+              onClick={() => setSelectedAlert(null)}
+              className="w-full mt-6 py-3 rounded-lg font-medium text-sm transition-all"
+              style={{ background: 'var(--cd-accent, #0EA5E9)', color: '#fff' }}
+              onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.9'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.opacity = '1'; }}
+            >
+              Fermer
+            </button>
           </div>
         </div>
       )}

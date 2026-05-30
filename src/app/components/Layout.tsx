@@ -19,11 +19,11 @@ interface SearchPatient {
 }
 
 const navItems = [
-  { path: '/dashboard', label: 'Tableau de bord', labelEn: 'Dashboard',  icon: LayoutDashboard },
-  { path: '/patients',  label: 'Patients',         labelEn: 'Patients',   icon: Users },
-  { path: '/alerts',    label: 'Alertes',           labelEn: 'Alerts',     icon: AlertTriangle },
-  { path: '/messages',  label: 'Messages',          labelEn: 'Messages',   icon: null, customIcon: MessageNavIcon },
-  { path: '/map',       label: 'Carte',             labelEn: 'Map',        icon: null, customIcon: MapNavIcon },
+  { path: '/dashboard', label: 'Tableau de bord', labelEn: 'Dashboard', icon: LayoutDashboard },
+  { path: '/patients', label: 'Patients', labelEn: 'Patients', icon: Users },
+  { path: '/alerts', label: 'Alertes', labelEn: 'Alerts', icon: AlertTriangle },
+  { path: '/messages', label: 'Messages', labelEn: 'Messages', icon: null, customIcon: MessageNavIcon },
+  { path: '/map', label: 'Carte', labelEn: 'Map', icon: null, customIcon: MapNavIcon },
 ];
 
 const bottomItems = [
@@ -32,18 +32,18 @@ const bottomItems = [
 
 export const Layout: React.FC = () => {
   const { user, profile, logout } = useAuth(); // ✅ logout corrigé
-  const { theme, toggleTheme }    = useTheme();
-  const { lang, setLang }         = useLang();
-  const navigate                  = useNavigate();
-  const location                  = useLocation();
+  const { theme, toggleTheme } = useTheme();
+  const { lang, setLang } = useLang();
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const [sidebarOpen, setSidebarOpen]         = useState(false);
-  const [search, setSearch]                   = useState('');
-  const [showDropdown, setShowDropdown]       = useState(false);
-  const [searchResults, setSearchResults]     = useState<SearchPatient[]>([]);
-  const [searchLoading, setSearchLoading]     = useState(false);
-  const [unreadAlerts, setUnreadAlerts]       = useState(0);
-  const searchRef                             = useRef<HTMLDivElement>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [searchResults, setSearchResults] = useState<SearchPatient[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const searchRef = useRef<HTMLDivElement>(null);
 
   const isFullHeightPage = location.pathname === '/map' || location.pathname === '/messages';
 
@@ -52,16 +52,44 @@ export const Layout: React.FC = () => {
     ? profile.full_name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('')
     : '?';
 
-  // ── Alertes non lues depuis ECG critiques ─────────────────────
+  // ── Alert counter: fetches once + stays live via Realtime ─────
   useEffect(() => {
-    const fetchAlerts = async () => {
-      const { count } = await supabase
-        .from('ecg_readings')
-        .select('*', { count: 'exact', head: true })
-        .eq('status', 'critical');
-      setUnreadAlerts(count ?? 0);
+    const fetchCount = async () => {
+      try {
+        const [{ count: ecgCount }, { count: emCount }] = await Promise.all([
+          supabase
+            .from('ecg_readings')
+            .select('*', { count: 'exact', head: true })
+            .in('status', ['critical', 'warning']),
+          supabase
+            .from('emergency_alerts')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'pending'),
+        ]);
+        setUnreadAlerts((ecgCount ?? 0) + (emCount ?? 0));
+      } catch {
+        // silently ignore — badge just stays at last known value
+      }
     };
-    fetchAlerts();
+
+    fetchCount();
+
+    // Re-fetch whenever ECG readings change
+    const ecgChannel = supabase
+      .channel('layout-ecg-alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'ecg_readings' }, fetchCount)
+      .subscribe();
+
+    // Re-fetch whenever emergency alerts change
+    const emChannel = supabase
+      .channel('layout-emergency-alerts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'emergency_alerts' }, fetchCount)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ecgChannel);
+      supabase.removeChannel(emChannel);
+    };
   }, []);
 
   // ── Recherche Supabase patients ───────────────────────────────
@@ -141,7 +169,7 @@ export const Layout: React.FC = () => {
 
   const getRiskColor = (status: string | null) => {
     if (status === 'critical') return { bg: 'linear-gradient(135deg, #EF4444, #DC2626)', badge: '#EF4444' };
-    if (status === 'warning')  return { bg: 'linear-gradient(135deg, #F59E0B, #D97706)', badge: '#F59E0B' };
+    if (status === 'warning') return { bg: 'linear-gradient(135deg, #F59E0B, #D97706)', badge: '#F59E0B' };
     return { bg: 'linear-gradient(135deg, #10B981, #059669)', badge: '#10B981' };
   };
 

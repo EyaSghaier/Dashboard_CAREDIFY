@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Send, Search, Phone, Video, MoreVertical,
   Paperclip, Smile, Loader2, CheckCheck, Star,
-  FileText, Download, X, Lock, Shield,
+  FileText, Download, X, Shield,
 } from 'lucide-react';
 import { useLang } from '../context/LanguageContext';
 import { supabase } from '../../lib/supabase';
@@ -73,7 +73,9 @@ export const MessagesPage: React.FC = () => {
     dataUrl: string;
   } | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef    = useRef<HTMLInputElement>(null);
+  const emojiPickerRef  = useRef<HTMLDivElement>(null);
+  const emojiButtonRef  = useRef<HTMLButtonElement>(null);
 
   const doctorUidRef   = useRef<string>('');
   const selectedIdRef  = useRef<string>('');
@@ -474,6 +476,23 @@ export const MessagesPage: React.FC = () => {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [selectedConvo?.messages.length]);
+
+  // ── 5. Close emoji picker on outside click ───────────────────────
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(e.target as Node) &&
+        emojiButtonRef.current &&
+        !emojiButtonRef.current.contains(e.target as Node)
+      ) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1056,42 +1075,59 @@ export const MessagesPage: React.FC = () => {
 
             {/* Emoji Picker Popover */}
             {showEmojiPicker && (
-              <div 
-                className="absolute bottom-16 right-4 z-50 rounded-2xl p-3 shadow-2xl w-72 sm:w-80 flex flex-col border border-var(--cd-bd) animate-fadeIn"
-                style={{ 
-                  backgroundColor: 'var(--cd-bg3)', 
-                  borderColor: 'var(--cd-bd)',
-                  backdropFilter: 'blur(16px)'
+              <div
+                ref={emojiPickerRef}
+                style={{
+                  position: 'absolute',
+                  bottom: '72px',
+                  right: '16px',
+                  zIndex: 50,
+                  borderRadius: '16px',
+                  padding: '12px',
+                  boxShadow: '0 25px 50px rgba(0,0,0,0.5)',
+                  width: '296px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  backgroundColor: 'var(--cd-bg3)',
+                  border: '1px solid var(--cd-bd)',
+                  backdropFilter: 'blur(16px)',
+                  animation: 'cd-fadeIn 0.15s ease-out',
                 }}
               >
-                <div className="flex items-center justify-between mb-2 pb-2 border-b border-var(--cd-bd)" style={{ borderColor: 'var(--cd-bd)' }}>
-                  <span className="text-xs font-bold text-[var(--cd-t1)] flex items-center gap-1.5">
-                    <Smile className="w-3.5 h-3.5 text-[#0EA5E9]" />
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '8px',
+                    paddingBottom: '8px',
+                    borderBottom: '1px solid var(--cd-bd)',
+                  }}
+                >
+                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--cd-t1)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Smile style={{ width: '14px', height: '14px', color: '#0EA5E9' }} />
                     {lang === 'FR' ? 'Choisir un émoji' : 'Select Emoji'}
                   </span>
-                  <button 
+                  <button
                     onClick={() => setShowEmojiPicker(false)}
-                    className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-[var(--cd-t4)]"
+                    style={{ padding: '4px', borderRadius: '50%', color: 'var(--cd-t4)', background: 'none', border: 'none', cursor: 'pointer' }}
                   >
-                    <X className="w-3.5 h-3.5" />
+                    <X style={{ width: '14px', height: '14px' }} />
                   </button>
                 </div>
-                <div className="grid grid-cols-8 gap-2 overflow-y-auto max-h-48 p-1 scrollbar-thin">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: '6px', overflowY: 'auto', maxHeight: '192px', padding: '4px' }}>
                   {[
-                    // Faces & expressions
-                    '😀', '😃', '😄', '😁', '😆', '😅', '😂', '🤣', '😊', '😇', 
-                    '🙂', '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', 
-                    '😛', '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🤩', '🥳', 
-                    '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖', 
-                    '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯', 
-                    '😳', '🥵', '🥶', '😱', '😨', '😰', '😥', '😓', '🤗', '🤔', 
-                    // Gestures & hands
-                    '👋', '🤚', '🖐️', '✋', '🖖', '👌', '🤏', '✌️', '🤞', '🤟', 
-                    '🤘', '🤙', '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', 
-                    '✊', '👊', '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', 
-                    // Medical & health
-                    '🏥', '🩺', '💊', '💉', '🩹', '🫀', '🫁', '🧠', '🩸', '🤒', 
-                    '🤕', '😷', '⚕️', '❤️', '💖', '💙', '💚', '💛', '💜', '🧡'
+                    '😀','😃','😄','😁','😆','😅','😂','🤣','😊','😇',
+                    '🙂','😉','😌','😍','🥰','😘','😗','😙','😚','😋',
+                    '😛','😝','😜','🤪','🤨','🧐','🤓','😎','🤩','🥳',
+                    '😏','😒','😞','😔','😟','😕','🙁','☹️','😣','😖',
+                    '😫','😩','🥺','😢','😭','😤','😠','😡','🤬','🤯',
+                    '😳','🥵','🥶','😱','😨','😰','😥','😓','🤗','🤔',
+                    '👋','🤚','🖐️','✋','🖖','👌','🤏','✌️','🤞','🤟',
+                    '🤘','🤙','👈','👉','👆','👇','☝️','👍','👎','✊',
+                    '👊','🤛','🤜','👏','🙌','👐','🤲','🤝','🙏','💪',
+                    '🏥','🩺','💊','💉','🩹','🫀','🫁','🧠','🩸','🤒',
+                    '🤕','😷','⚕️','❤️','💖','💙','💚','💛','💜','🧡',
                   ].map((emoji) => (
                     <button
                       key={emoji}
@@ -1099,7 +1135,27 @@ export const MessagesPage: React.FC = () => {
                         setInputText((prev) => prev + emoji);
                         setShowEmojiPicker(false);
                       }}
-                      className="w-8 h-8 flex items-center justify-center text-lg rounded-lg hover:bg-black/5 dark:hover:bg-white/5 hover:scale-110 active:scale-95 transition-all duration-150"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '18px',
+                        borderRadius: '8px',
+                        border: 'none',
+                        background: 'none',
+                        cursor: 'pointer',
+                        transition: 'transform 0.1s ease, background-color 0.1s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--cd-hv)';
+                        e.currentTarget.style.transform = 'scale(1.2)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
+                        e.currentTarget.style.transform = 'scale(1)';
+                      }}
                     >
                       {emoji}
                     </button>
@@ -1127,11 +1183,12 @@ export const MessagesPage: React.FC = () => {
                 className="flex-1 bg-transparent text-sm outline-none"
                 style={{ color: 'var(--cd-t1)' }}
               />
-              <button 
-                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                className="p-1 transition-colors" 
-                style={{ color: showEmojiPicker ? '#0EA5E9' : 'var(--cd-t4)' }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--cd-t1)'; }}
+              <button
+                ref={emojiButtonRef}
+                onClick={() => setShowEmojiPicker((v) => !v)}
+                className="p-1 transition-colors"
+                style={{ color: showEmojiPicker ? '#0EA5E9' : 'var(--cd-t4)', background: 'none', border: 'none', cursor: 'pointer' }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#0EA5E9'; }}
                 onMouseLeave={(e) => { if (!showEmojiPicker) e.currentTarget.style.color = 'var(--cd-t4)'; }}
               >
                 <Smile className="w-4 h-4" />
@@ -1173,41 +1230,80 @@ export const MessagesPage: React.FC = () => {
 
       {/* File access permission modal */}
       {showPermissionModal && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
-          <div 
-            className="w-full max-w-md p-6 rounded-2xl shadow-2xl border text-center animate-scaleUp"
-            style={{ 
-              backgroundColor: 'var(--cd-bg3)', 
-              borderColor: 'var(--cd-bd)' 
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            backgroundColor: 'rgba(0,0,0,0.65)',
+            backdropFilter: 'blur(8px)',
+            animation: 'cd-fadeIn 0.2s ease-out',
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowPermissionModal(false); }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '420px',
+              padding: '28px 24px',
+              borderRadius: '20px',
+              boxShadow: '0 30px 60px rgba(0,0,0,0.5)',
+              border: '1px solid var(--cd-bd)',
+              textAlign: 'center',
+              backgroundColor: 'var(--cd-bg3)',
+              animation: 'cd-scaleUp 0.2s ease-out',
             }}
           >
-            <div className="w-12 h-12 rounded-full bg-[#0EA5E9]/15 flex items-center justify-center mx-auto mb-4 border border-[#0EA5E9]/30">
-              <Shield className="w-6 h-6 text-[#0EA5E9]" />
+            <div style={{ width: '52px', height: '52px', borderRadius: '50%', background: 'rgba(14,165,233,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', border: '1px solid rgba(14,165,233,0.3)' }}>
+              <Shield style={{ width: '26px', height: '26px', color: '#0EA5E9' }} />
             </div>
-            
-            <h3 className="text-lg font-bold mb-2 text-[var(--cd-t1)]">
-              {lang === 'FR' ? "Autorisation d'accès aux fichiers" : "File Sharing Access Requested"}
+
+            <h3 style={{ fontSize: '17px', fontWeight: 700, marginBottom: '10px', color: 'var(--cd-t1)' }}>
+              {lang === 'FR' ? "Autorisation d'accès aux fichiers" : 'File Sharing Access Requested'}
             </h3>
-            
-            <p className="text-xs mb-6 text-[var(--cd-t4)] leading-relaxed">
-              {lang === 'FR' 
+
+            <p style={{ fontSize: '12px', marginBottom: '24px', color: 'var(--cd-t4)', lineHeight: 1.6 }}>
+              {lang === 'FR'
                 ? "Pour envoyer des rapports d'ECG, des ordonnances ou des images de suivi, Caredify requiert votre permission pour lire les fichiers locaux. Vos documents sont chiffrés et transmis en toute sécurité."
-                : "To send ECG records, prescriptions, or follow-up images, Caredify requires your permission to read local files. Your documents are encrypted and transmitted securely."}
+                : 'To send ECG records, prescriptions, or follow-up images, Caredify requires your permission to read local files. Your documents are encrypted and transmitted securely.'}
             </p>
-            
-            <div className="flex gap-3 justify-center">
+
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
               <button
                 onClick={() => setShowPermissionModal(false)}
-                className="px-4 py-2 text-xs font-semibold rounded-xl hover:bg-black/5 border border-var(--cd-bd) text-[var(--cd-t3)]"
+                style={{
+                  padding: '8px 18px',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  borderRadius: '12px',
+                  border: '1px solid var(--cd-bd)',
+                  color: 'var(--cd-t3)',
+                  background: 'transparent',
+                  cursor: 'pointer',
+                }}
               >
                 {lang === 'FR' ? 'Refuser' : 'Deny'}
               </button>
-              
+
               <button
                 onClick={grantFilePermission}
-                className="px-5 py-2 text-xs font-bold text-white rounded-xl bg-gradient-to-r from-[#0EA5E9] to-[#0284c7] hover:scale-105 transition-all shadow-md shadow-[#0ea5e9]/20"
+                style={{
+                  padding: '8px 22px',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  color: '#fff',
+                  borderRadius: '12px',
+                  border: 'none',
+                  background: 'linear-gradient(135deg, #0EA5E9, #0284c7)',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(14,165,233,0.35)',
+                }}
               >
-                {lang === 'FR' ? "Autoriser l'accès" : "Allow Access"}
+                {lang === 'FR' ? "Autoriser l'accès" : 'Allow Access'}
               </button>
             </div>
           </div>

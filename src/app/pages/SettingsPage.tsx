@@ -6,7 +6,7 @@ import {
 import { useAuth } from '../context/AuthContext';
 import { useLocation } from '../context/LocationContext';
 import { useLang } from '../context/LanguageContext';
-import { supabase } from '../../lib/supabase';
+import { supabase, isDoctor } from '../../lib/supabase';
 
 const t = {
   FR: {
@@ -117,6 +117,9 @@ export const SettingsPage: React.FC = () => {
   const tr = t[lang];
   const loc = useLocation();
 
+  // Cardiologists can only edit name, phone and hospital
+  const isCardiologist = isDoctor(profile?.role);
+
   const [threshold, setThreshold]           = useState(75);
   const [warningThreshold, setWarningThreshold] = useState(50);
   const [saved, setSaved]                   = useState(false);
@@ -199,16 +202,23 @@ export const SettingsPage: React.FC = () => {
     if (!user) return;
     setSaving(true);
     try {
+      // Build update payload — cardiologists can only touch 3 fields
+      const updatePayload: Record<string, string> = {
+        full_name:       profileForm.full_name,
+        phone:           profileForm.phone,
+        hospital_clinic: profileForm.hospital_clinic,
+        updated_at:      new Date().toISOString(),
+      };
+
+      // Admin / non-cardiologist roles can also update specialty & license
+      if (!isCardiologist) {
+        updatePayload.specialty              = profileForm.specialty;
+        updatePayload.medical_license_number = profileForm.medical_license_number;
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .update({
-          full_name:              profileForm.full_name,
-          phone:                  profileForm.phone,
-          specialty:              profileForm.specialty,
-          hospital_clinic:        profileForm.hospital_clinic,
-          medical_license_number: profileForm.medical_license_number,
-          updated_at:             new Date().toISOString(),
-        })
+        .update(updatePayload)
         .eq('id', user.id);
 
       if (error) throw error;
@@ -236,9 +246,9 @@ export const SettingsPage: React.FC = () => {
     { label: tr.fieldName,      key: 'full_name',              icon: <User className="w-3.5 h-3.5" />,     readOnly: false },
     { label: tr.fieldEmail,     key: 'email',                  icon: <Mail className="w-3.5 h-3.5" />,     readOnly: true  },
     { label: tr.fieldPhone,     key: 'phone',                  icon: <Phone className="w-3.5 h-3.5" />,    readOnly: false },
-    { label: tr.fieldSpecialty, key: 'specialty',              icon: <Activity className="w-3.5 h-3.5" />, readOnly: false },
-    { label: tr.fieldHospital,  key: 'hospital_clinic',        icon: <Shield className="w-3.5 h-3.5" />,   readOnly: false },
-    { label: tr.fieldLicense,   key: 'medical_license_number', icon: <Shield className="w-3.5 h-3.5" />,   readOnly: false },
+    { label: tr.fieldSpecialty, key: 'specialty',              icon: <Activity className="w-3.5 h-3.5" />, readOnly: isCardiologist },
+    { label: tr.fieldHospital,  key: 'hospital_clinic',        icon: <MapPin className="w-3.5 h-3.5" />,   readOnly: false },
+    { label: tr.fieldLicense,   key: 'medical_license_number', icon: <Shield className="w-3.5 h-3.5" />,   readOnly: isCardiologist },
   ];
 
   const toggleItems = [
