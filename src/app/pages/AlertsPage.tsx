@@ -43,21 +43,14 @@ const t = {
     filterAll: 'Toutes', filterUnread: 'Non lues',
     filterCritical: 'Critiques', filterWarning: 'Avertissements',
     alertCount: (n: number) => `${n} alertes`,
-<<<<<<< HEAD
     aiScore: 'Score IA:',
     confirm: 'Confirmer', dismiss: 'Ignorer',
     confirmed: 'Confirmée', dismissed: 'Ignorée',
     viewPatient: 'Voir dossier complet',
     critical: 'CRITIQUE', warning: 'AVERTISSEMENT',
-=======
-    confirm: 'Confirmer', dismiss: 'Ignorer',
-    confirmed: 'Confirmée ✓', dismissed: 'Ignorée',
-    viewPatient: 'Voir patient',
->>>>>>> a069ff133295649a400f0e3e624a410d9f18fbd7
     empty: 'Aucune alerte dans cette catégorie.',
     loading: 'Chargement des alertes...',
     emergencyAlerts: "Alertes d'urgence",
-<<<<<<< HEAD
     emergencyConfirm: 'Confirmer',
     emergencyCancel: 'Ignorer',
     clickForDetails: 'Cliquer pour voir les détails',
@@ -79,8 +72,6 @@ const t = {
     years: 'ans',
     loadingPatient: 'Chargement des informations...',
     // Confirm modal
-=======
->>>>>>> a069ff133295649a400f0e3e624a410d9f18fbd7
     confirmModalTitle: "Confirmer l'alerte",
     confirmModalSubtitle: 'Ajoutez une note médicale avant de confirmer.',
     quickSuggestions: 'SUGGESTIONS RAPIDES',
@@ -99,21 +90,17 @@ const t = {
     filterAll: 'All', filterUnread: 'Unread',
     filterCritical: 'Critical', filterWarning: 'Warnings',
     alertCount: (n: number) => `${n} alerts`,
-<<<<<<< HEAD
     aiScore: 'AI Score:',
     confirm: 'Confirm', dismiss: 'Dismiss',
     confirmed: 'Confirmed', dismissed: 'Dismissed',
     viewPatient: 'View full record',
     critical: 'CRITICAL', warning: 'WARNING',
-=======
     confirm: 'Confirm', dismiss: 'Dismiss',
     confirmed: 'Confirmed ✓', dismissed: 'Dismissed',
     viewPatient: 'View patient',
->>>>>>> a069ff133295649a400f0e3e624a410d9f18fbd7
     empty: 'No alerts in this category.',
     loading: 'Loading alerts...',
     emergencyAlerts: 'Emergency Alerts',
-<<<<<<< HEAD
     emergencyConfirm: 'Confirm',
     emergencyCancel: 'Dismiss',
     clickForDetails: 'Click to view details',
@@ -135,8 +122,6 @@ const t = {
     years: 'yo',
     loadingPatient: 'Loading information...',
     // Confirm modal
-=======
->>>>>>> a069ff133295649a400f0e3e624a410d9f18fbd7
     confirmModalTitle: 'Confirm Alert',
     confirmModalSubtitle: 'Add a medical note before confirming.',
     quickSuggestions: 'QUICK SUGGESTIONS',
